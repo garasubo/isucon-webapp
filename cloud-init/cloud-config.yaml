@@ -1,0 +1,10 @@
+timezone: Asia/Tokyo
+locale: ja_JP.utf8
+packages:
+  - vim
+  - git
+  - rsync
+  - curl
+  - nginx
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFNwJyKISVgf3Zxx1GmGH+ey/ZMaA70PQyspAQbZ1LGk garasubo@onimaru

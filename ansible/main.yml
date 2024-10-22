@@ -1,0 +1,73 @@
+- name: Setup server
+  hosts: all
+  tasks:
+    - name: install packages
+      become: true
+      apt:
+        name: "{{ item }}"
+      vars:
+        item:
+          - vim
+          - git
+          - rsync
+          - curl
+          - nginx
+          - tmux
+          - zsh
+          - mysql-server-8.0
+          - build-essential
+          - zlib1g-dev
+          - libncurses-dev
+          - libssl-dev
+          - libbzip3-dev
+          - liblzma-dev
+          - libsqlite3-dev
+          - libbz2-dev
+          - libreadline-dev
+    - name: Install Cloudflared
+      block:
+        - name: create directory
+          become: true
+          file:
+            path: /usr/share/keyrings
+            state: directory
+            mode: '0755'
+        - name: Add Cloudflare’s package signing key
+          become: true
+          get_url:
+            url: https://pkg.cloudflare.com/cloudflare-main.gpg
+            dest: /usr/share/keyrings/cloudflare-main.gpg
+        - name: Add Cloudflare’s package repository
+          become: true
+          apt_repository:
+            repo: deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared jammy main
+            state: present
+        - name: Install Cloudflared
+          become: true
+          apt:
+            name: cloudflared
+    - name: setup nginx
+      block:
+        - name: setup directory
+          become: true
+          file:
+            path: /var/www/isucon-webapp
+            state: directory
+            mode: '0755'
+            owner: ubuntu
+        - name: setup nginx
+          become: true
+          copy:
+            src: files/nginx-default.conf
+            dest: /etc/nginx/sites-available/default
+        - name: enable site
+          become: true
+          file:
+            src: /etc/nginx/sites-available/default
+            dest: /etc/nginx/sites-enabled/default
+            state: link
+        - name: restart nginx
+          become: true
+          service:
+            name: nginx
+            state: restarted
