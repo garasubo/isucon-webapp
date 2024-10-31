@@ -19,7 +19,6 @@
           - zlib1g-dev
           - libncurses-dev
           - libssl-dev
-          - libbzip3-dev
           - liblzma-dev
           - libsqlite3-dev
           - libbz2-dev
@@ -71,3 +70,54 @@
           service:
             name: nginx
             state: restarted
+    - name: setup gh-cli
+      block:
+        - name: check gh command
+          command: gh --version
+      rescue:
+        - name: Add githubcli’s package signing key
+          become: true
+          get_url:
+            url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+            dest: /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        - name: add gh-cli repository
+          become: true
+          apt_repository:
+            repo: deb [arch=amd64 signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main
+            state: present
+        - name: install gh-cli
+          become: true
+          apt:
+            name: gh
+    - name: setup alp
+      block:
+        - name: check alp command
+          command: alp --version
+      rescue:
+        - name: download alp zip
+          get_url:
+            url: https://github.com/tkuchiki/alp/releases/download/v1.0.21/alp_linux_amd64.tar.gz
+            dest: "/tmp/alp.tar.gz"
+            mode: '0644'
+        - name: extract alp
+          become: true
+          unarchive:
+            src: "/tmp/alp.tar.gz"
+            dest: "/tmp/"
+            remote_src: true
+        - name: install alp
+          become: true
+          shell: install "/tmp/alp" /usr/local/bin/alp
+    - name: generate ssh key
+      block:
+        - name: check ssh key
+          stat: path=/home/ubuntu/.ssh/id_ed25519
+          register: ssh_key
+        - name: create directory
+          file:
+            path: /home/ubuntu/.ssh
+            state: directory
+          when: ssh_key.stat.exists == False
+        - name: generate ssh key
+          shell: ssh-keygen -t ed25519 -f /home/ubuntu/.ssh/id_ed25519 -q -N ""
+          when: ssh_key.stat.exists == False
