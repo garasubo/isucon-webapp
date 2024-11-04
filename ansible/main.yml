@@ -14,7 +14,6 @@
           - nginx
           - tmux
           - zsh
-          - mysql-server-8.0
           - build-essential
           - zlib1g-dev
           - libncurses-dev
@@ -23,6 +22,7 @@
           - libsqlite3-dev
           - libbz2-dev
           - libreadline-dev
+          - mysql-server
     - name: Install Cloudflared
       block:
         - name: create directory
@@ -121,3 +121,9 @@
         - name: generate ssh key
           shell: ssh-keygen -t ed25519 -f /home/ubuntu/.ssh/id_ed25519 -q -N ""
           when: ssh_key.stat.exists == False
+    - name: setup db
+      become: true
+      shell: |
+        mysql -u root -e "CREATE USER IF NOT EXISTS 'isucon'@'localhost' IDENTIFIED BY 'isucon';"
+        mysql -u root -e "GRANT ALL PRIVILEGES ON *.* TO 'isucon'@'localhost';"
+        mysql -u root -e "CREATE DATABASE IF NOT EXISTS isucon-webapp;"
