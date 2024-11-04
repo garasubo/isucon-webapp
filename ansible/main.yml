@@ -126,4 +126,14 @@
       shell: |
         mysql -u root -e "CREATE USER IF NOT EXISTS 'isucon'@'localhost' IDENTIFIED BY 'isucon';"
         mysql -u root -e "GRANT ALL PRIVILEGES ON *.* TO 'isucon'@'localhost';"
-        mysql -u root -e "CREATE DATABASE IF NOT EXISTS isucon-webapp;"
+        mysql -u root -e "CREATE DATABASE IF NOT EXISTS webapp;"
+    - name: create systemd directory
+      become: true
+      file:
+        path: /etc/systemd/system
+        state: directory
+    - name: setup backend service
+      become: true
+      template:
+        src: files/isucon-webapp-backend.service.j2
+        dest: /etc/systemd/system/isucon-webapp-backend.service

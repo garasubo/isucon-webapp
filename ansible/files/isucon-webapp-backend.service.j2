@@ -1,0 +1,17 @@
+[Unit]
+Description=isucon-webapp-backend
+After=syslog.target
+
+[Service]
+WorkingDirectory={{ ansible_user_dir }}/api-server
+EnvironmentFile={{ ansible_user_dir }}/env.sh
+PIDFile={{ ansible_user_dir }}/api-server/server.pid
+
+User={{ ansible_user_id }}
+Group={{ ansible_user_id }}
+ExecStart={{ ansible_user_dir }}/bin/backend
+
+Restart   = always
+Type      = simple
+[Install]
+WantedBy=multi-user.target
