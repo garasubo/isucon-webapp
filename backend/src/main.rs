@@ -101,8 +101,18 @@ async fn task_runner(pool: MySqlPool) -> Result<(), AppError> {
     loop {
         let mut tx = pool.begin().await?;
         let task = sqlx::query_as::<_, Task>("SELECT id, branch, status FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 1 FOR UPDATE")
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await?;
+        let task = match task {
+            Some(task) => task,
+            None => {
+                tx.commit().await?;
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                print!("No new task found. Sleeping...");
+                continue;
+            }
+        };
+
         println!("task: {:?}", task);
         sqlx::query("UPDATE tasks SET status = 'running' WHERE id = ?")
             .bind(task.id)
@@ -115,6 +125,22 @@ async fn task_runner(pool: MySqlPool) -> Result<(), AppError> {
             .execute(&pool)
             .await?;
     }
+}
+
+async fn init_database(pool: &MySqlPool) -> Result<(), AppError> {
+    pool.execute(
+        "
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            branch VARCHAR(255) NOT NULL,
+            status ENUM('pending', 'running', 'done') NOT NULL DEFAULT 'pending',
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL
+        )
+    ",
+    )
+    .await?;
+    Ok(())
 }
 
 #[tokio::main]
@@ -132,10 +158,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks", axum::routing::get(get_tasks_handler))
         .route("/api/tasks", axum::routing::post(post_task_handler))
         .with_state(AppState { pool: pool.clone() });
+    init_database(&pool).await?;
     tokio::task::spawn(async {
         task_runner(pool).await.unwrap();
     });
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
 
     axum::serve(listener, app).await.unwrap();
     Ok(())
