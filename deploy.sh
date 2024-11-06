@@ -10,5 +10,7 @@ cd "$(dirname "$0")"
 pushd backend
 cargo build --release
 ssh $HOST 'mkdir -p /home/ubuntu/bin'
+ssh $HOST 'mkdir -p /home/ubuntu/api-server'
+ssh $HOST 'touch /home/ubuntu/env.sh'
 rsync -avrz target/release/backend $HOST:/home/ubuntu/bin/backend
 ssh $HOST 'sudo systemctl restart isucon-webapp-backend.service'
