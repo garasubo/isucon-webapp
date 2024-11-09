@@ -145,8 +145,13 @@ async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Erro
 
         // checkout branch and deploy
         //tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        let _ = tokio::process::Command::new("git")
+            .arg("fetch")
+            .current_dir(&repo_directory)
+            .output()
+            .await?;
         let output = tokio::process::Command::new("git")
-            .args(["checkout", &task.branch])
+            .args(["checkout", &format!("origin/{}", &task.branch)])
             .current_dir(&repo_directory)
             .output()
             .await?;
