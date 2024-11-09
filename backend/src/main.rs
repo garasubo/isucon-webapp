@@ -3,20 +3,24 @@ use axum::Router;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions};
 use sqlx::{ConnectOptions, Executor};
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::Type)]
 #[sqlx(type_name = "enum", rename_all = "lowercase")]
 enum TaskStatus {
     Pending,
-    Running,
+    Deploying,
+    DeployFailed,
+    Deployed,
     Done,
 }
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 struct Task {
+    #[sqlx(try_from = "i64")]
     id: u64,
     branch: String,
-    status: TaskStatus,
+    status: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -25,12 +29,15 @@ enum AppError {
     SqlxError(#[from] sqlx::Error),
     #[error(transparent)]
     InternalServerError(#[from] anyhow::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
     #[error("invalid query parameter: {0}")]
     InvalidQueryParameter(String),
 }
 
 impl axum::response::IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response<axum::body::Body> {
+        eprintln!("error: {:?}", self);
         match self {
             AppError::InvalidQueryParameter(message) => axum::http::Response::builder()
                 .status(axum::http::StatusCode::BAD_REQUEST)
@@ -52,7 +59,7 @@ async fn init_handler(State(AppState { pool }): State<AppState>) -> Result<Strin
         CREATE TABLE IF NOT EXISTS tasks (
             id INT PRIMARY KEY AUTO_INCREMENT,
             branch VARCHAR(255) NOT NULL,
-            status ENUM('pending', 'running', 'done') NOT NULL DEFAULT 'pending',
+            status CHAR(16) NOT NULL DEFAULT 'pending',
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL
         )
@@ -76,20 +83,18 @@ async fn get_tasks_handler(
 async fn post_task_handler(
     State(AppState { pool }): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> Result<axum::Json<Task>, AppError> {
+) -> Result<axum::Json<u64>, AppError> {
     let branch = params
         .get("branch")
         .ok_or(AppError::InvalidQueryParameter("branch".to_string()))?;
-    let mut tx = pool.begin().await?;
-    let task = sqlx::query_as::<_, Task>(
+    let result = sqlx::query(
         "INSERT INTO tasks (branch, status, created_at, updated_at) VALUES (?, ?, NOW(), NOW())",
     )
     .bind(branch)
-    .bind(TaskStatus::Pending)
-    .fetch_one(&mut *tx)
+    .bind("pending")
+    .execute(&pool)
     .await?;
-    tx.commit().await?;
-    Ok(axum::Json(task))
+    Ok(axum::Json(result.last_insert_id()))
 }
 
 #[derive(Clone)]
@@ -97,9 +102,27 @@ struct AppState {
     pool: MySqlPool,
 }
 
-async fn task_runner(pool: MySqlPool) -> Result<(), AppError> {
+#[derive(Debug, serde::Deserialize)]
+struct Config {
+    app_repository: String,
+    deploy_command: String,
+}
+
+async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Error> {
+
+    let repo_directory = Path::canonicalize(Path::new("."))?.join(config.app_repository.split("/").last().unwrap());
+    println!("repo_directory: {:?}", repo_directory);
     loop {
         let mut tx = pool.begin().await?;
+        let going_tasks = sqlx::query_as::<_, Task>("SELECT id, branch, status FROM tasks WHERE status = 'deploying' OR status = 'deployed' LIMIT 1")
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(task) = going_tasks {
+            println!("task is going: {:?}", task);
+            tx.commit().await?;
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            continue;
+        }
         let task = sqlx::query_as::<_, Task>("SELECT id, branch, status FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 1 FOR UPDATE")
             .fetch_optional(&mut *tx)
             .await?;
@@ -108,43 +131,81 @@ async fn task_runner(pool: MySqlPool) -> Result<(), AppError> {
             None => {
                 tx.commit().await?;
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                print!("No new task found. Sleeping...");
+                println!("No new task found. Sleeping...");
                 continue;
             }
         };
 
         println!("task: {:?}", task);
-        sqlx::query("UPDATE tasks SET status = 'running' WHERE id = ?")
+        sqlx::query("UPDATE tasks SET status = 'deploying' WHERE id = ?")
             .bind(task.id)
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-        sqlx::query("UPDATE tasks SET status = 'done' WHERE id = ? AND status = 'running'")
+
+        // checkout branch and deploy
+        //tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        let output = tokio::process::Command::new("git")
+            .args(["checkout", &task.branch])
+            .current_dir(&repo_directory)
+            .output()
+            .await?;
+        if output.status.code() != Some(0) {
+            eprintln!("git checkout failed: {:?}", String::from_utf8_lossy(&output.stderr));
+            sqlx::query("UPDATE tasks SET status = 'deploy_failed' WHERE id = ?")
+                .bind(task.id)
+                .execute(&pool)
+                .await?;
+            continue;
+        }
+        println!("checkout done");
+        let output = tokio::process::Command::new("bash")
+            .args(["-c", &config.deploy_command])
+            .current_dir(&repo_directory)
+            .output()
+            .await?;
+        if output.status.code() != Some(0) {
+            eprintln!("deploy failed: {:?}", String::from_utf8_lossy(&output.stderr));
+            sqlx::query("UPDATE tasks SET status = 'deploy_failed' WHERE id = ?")
+                .bind(task.id)
+                .execute(&pool)
+                .await?;
+            continue;
+        }
+
+        // update status
+        sqlx::query("UPDATE tasks SET status = 'deployed' WHERE id = ? AND status = 'running'")
             .bind(task.id)
             .execute(&pool)
             .await?;
     }
 }
 
-async fn init_database(pool: &MySqlPool) -> Result<(), AppError> {
+async fn init(pool: &MySqlPool, config: &Config) -> Result<(), AppError> {
     pool.execute(
         "
         CREATE TABLE IF NOT EXISTS tasks (
             id INT PRIMARY KEY AUTO_INCREMENT,
             branch VARCHAR(255) NOT NULL,
-            status ENUM('pending', 'running', 'done') NOT NULL DEFAULT 'pending',
+            status CHAR(16) NOT NULL DEFAULT 'pending',
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL
         )
     ",
     )
     .await?;
+
+    let _output = tokio::process::Command::new("gh")
+        .args(["repo", "clone", &config.app_repository])
+        .output()
+        .await?;
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv::dotenv().ok();
+    let config = envy::from_env::<Config>()?;
     let options = MySqlConnectOptions::new()
         .host("localhost")
         .port(3306)
@@ -158,9 +219,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks", axum::routing::get(get_tasks_handler))
         .route("/api/tasks", axum::routing::post(post_task_handler))
         .with_state(AppState { pool: pool.clone() });
-    init_database(&pool).await?;
+    init(&pool, &config).await?;
     tokio::task::spawn(async {
-        task_runner(pool).await.unwrap();
+        if let Err(e) = task_runner(pool, config).await {
+            eprintln!("task_runner error: {:?}", e);
+        }
     });
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
 

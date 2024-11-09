@@ -137,3 +137,23 @@
       template:
         src: files/isucon-webapp-backend.service.j2
         dest: /etc/systemd/system/isucon-webapp-backend.service
+    - name: check rustup
+      shell:
+        executable: /bin/bash
+        cmd: |
+          source $HOME/.profile
+          rustup --version
+      register: rustup
+      ignore_errors: true
+    - name: install rust
+      when: not rustup.rc == 0
+      shell: |
+        curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- -y
+        echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> $HOME/.bashrc
+    - name: install cargo tools
+      shell:
+        executable: /bin/bash
+        cmd: |
+          source $HOME/.cargo/env
+          cargo install cross
+          cargo install just

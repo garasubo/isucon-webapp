@@ -4,12 +4,12 @@ After=syslog.target
 
 [Service]
 WorkingDirectory={{ ansible_user_dir }}/api-server
-EnvironmentFile={{ ansible_user_dir }}/env.sh
+EnvironmentFile={{ ansible_user_dir }}/api-server/.env
 PIDFile={{ ansible_user_dir }}/api-server/server.pid
 
 User={{ ansible_user_id }}
 Group={{ ansible_user_id }}
-ExecStart={{ ansible_user_dir }}/bin/backend
+ExecStart={{ ansible_user_dir }}/api-server/backend
 
 Restart   = always
 Type      = simple

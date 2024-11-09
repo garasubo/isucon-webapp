@@ -8,9 +8,8 @@ cd "$(dirname "$0")"
 
 # deploy backend
 pushd backend
-cargo build --release
-ssh $HOST 'mkdir -p /home/ubuntu/bin'
+cross build --release
 ssh $HOST 'mkdir -p /home/ubuntu/api-server'
-ssh $HOST 'touch /home/ubuntu/env.sh'
-rsync -avrz target/release/backend $HOST:/home/ubuntu/bin/backend
+ssh $HOST 'touch /home/ubuntu/api-server/.env'
+rsync -avrz target/x86_64-unknown-linux-gnu/release/backend $HOST:/home/ubuntu/api-server/backend
 ssh $HOST 'sudo systemctl restart isucon-webapp-backend.service'
