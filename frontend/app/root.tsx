@@ -6,6 +6,8 @@ import {
   ScrollRestoration,
 } from "@remix-run/react";
 import type { LinksFunction } from "@remix-run/node";
+import styles from "../styles/app.scss?url";
+import { Container, Navbar } from "react-bootstrap";
 
 import "./tailwind.css";
 
@@ -28,11 +30,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link href={styles} rel="stylesheet" />
         <Meta />
         <Links />
       </head>
       <body>
-        {children}
+        <Navbar expand="lg" className="bg-body-tertiary">
+          <Container>
+            <Navbar.Brand href="/">ISUCON14 Deploy Server</Navbar.Brand>
+          </Container>
+        </Navbar>
+        <main>{children}</main>
         <ScrollRestoration />
         <Scripts />
       </body>

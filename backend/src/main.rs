@@ -232,7 +232,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = envy::from_env::<Config>()?;
     let options = MySqlConnectOptions::new()
         .host("localhost")
-        .port(3306)
+        .port(std::env::var("MYSQL_PORT").unwrap_or("3306".to_string()).parse::<u16>().unwrap())
         .username("isucon")
         .password("isucon")
         .database("webapp");

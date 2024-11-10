@@ -1,0 +1,76 @@
+@import 'bootstrap/dist/css/bootstrap.min.css';
+
+main {
+  padding: 20px;
+}
+
+.communication-form {
+  margin-bottom: 16px;
+}
+
+.communication-history {
+  margin: 16px;
+}
+
+.communication-history-text-container {
+  display: flex;
+  justify-content: left;
+}
+
+.communication-history-reply-container {
+  display: flex;
+  justify-content: right;
+}
+
+.communication-history-text {
+  display: inline-block;
+  background: #FFE9D0;
+  padding: 16px;
+  margin-bottom: 16px;
+  margin-right: 16px;
+}
+
+.communication-history-reply {
+  display: inline-block;
+  background: #BBE9FF;
+  padding: 16px;
+  margin-bottom: 16px;
+  margin-left: 16px;
+}
+
+.threed-solution-textarea {
+  width: 480px;
+  height: 160px;
+  resize: both;
+  font-family: monospace;
+}
+
+.threed-sim-table {
+  margin: 16px;
+  border: #0a3622 1px solid;
+
+  td {
+    border: #0a3622 1px solid;
+    width: 32px;
+    height: 32px;
+    text-align: center;
+  }
+
+}
+
+.spaceship-viewer-status {
+  padding: 16px;
+  font-family: monospace;
+  p {
+    margin: 0;
+    padding: 0;
+  }
+}
+
+.spaceship-viewer-inst {
+  margin: 16px;
+  p {
+    margin: 0;
+    padding: 0;
+  }
+}
