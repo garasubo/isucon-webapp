@@ -155,5 +155,20 @@
         executable: /bin/bash
         cmd: |
           source $HOME/.cargo/env
-          cargo install cross
+          cargo install cross --git https://github.com/cross-rs/cross
           cargo install just
+    - name: check docker
+      shell:
+        executable: /bin/bash
+        cmd: |
+          docker --version
+      register: rustup
+      ignore_errors: true
+    - name: install docker
+      when: not rustup.rc == 0
+      shell:
+        executable: /bin/bash
+        cmd: |
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sh get-docker.sh
+          sudo usermod -aG docker $USER

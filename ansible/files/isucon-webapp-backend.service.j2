@@ -9,7 +9,7 @@ PIDFile={{ ansible_user_dir }}/api-server/server.pid
 
 User={{ ansible_user_id }}
 Group={{ ansible_user_id }}
-ExecStart={{ ansible_user_dir }}/api-server/backend
+ExecStart=/bin/bash -c "source {{ ansible_user_dir}}/.profile; {{ ansible_user_dir }}/api-server/backend"
 
 Restart   = always
 Type      = simple

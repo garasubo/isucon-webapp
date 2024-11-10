@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{State};
 use axum::Router;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions};
 use sqlx::{ConnectOptions, Executor};
@@ -97,6 +97,23 @@ async fn post_task_handler(
     Ok(axum::Json(result.last_insert_id()))
 }
 
+#[axum::debug_handler]
+async fn update_task_handler(
+    State(AppState { pool }): State<AppState>,
+    axum::extract::Path((id,)): axum::extract::Path<(u64,)>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<axum::Json<u64>, AppError> {
+    let status = params
+        .get("status")
+        .ok_or(AppError::InvalidQueryParameter("status".to_string()))?;
+    let result = sqlx::query("UPDATE tasks SET status = ? WHERE id = ? LIMIT 1")
+        .bind(status)
+        .bind(id)
+        .execute(&pool)
+        .await?;
+    Ok(axum::Json(result.rows_affected()))
+}
+
 #[derive(Clone)]
 struct AppState {
     pool: MySqlPool,
@@ -110,7 +127,7 @@ struct Config {
 
 async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Error> {
 
-    let repo_directory = Path::canonicalize(Path::new("."))?.join(config.app_repository.split("/").last().unwrap());
+    let repo_directory = Path::canonicalize(Path::new("."))?.join("repo");
     println!("repo_directory: {:?}", repo_directory);
     loop {
         let mut tx = pool.begin().await?;
@@ -179,7 +196,7 @@ async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Erro
         }
 
         // update status
-        sqlx::query("UPDATE tasks SET status = 'deployed' WHERE id = ? AND status = 'running'")
+        sqlx::query("UPDATE tasks SET status = 'deployed' WHERE id = ? AND status = 'deploying'")
             .bind(task.id)
             .execute(&pool)
             .await?;
@@ -200,8 +217,10 @@ async fn init(pool: &MySqlPool, config: &Config) -> Result<(), AppError> {
     )
     .await?;
 
+    tokio::fs::remove_dir_all("repo").await.ok();
+
     let _output = tokio::process::Command::new("gh")
-        .args(["repo", "clone", &config.app_repository])
+        .args(["repo", "clone", &config.app_repository, "repo"])
         .output()
         .await?;
     Ok(())
@@ -223,6 +242,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/init", axum::routing::post(init_handler))
         .route("/api/tasks", axum::routing::get(get_tasks_handler))
         .route("/api/tasks", axum::routing::post(post_task_handler))
+        .route("/api/tasks/:id", axum::routing::post(update_task_handler))
         .with_state(AppState { pool: pool.clone() });
     init(&pool, &config).await?;
     tokio::task::spawn(async {
