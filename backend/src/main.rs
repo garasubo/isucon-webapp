@@ -13,6 +13,7 @@ enum TaskStatus {
     DeployFailed,
     Deployed,
     Done,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
@@ -106,12 +107,12 @@ async fn update_task_handler(
     let status = params
         .get("status")
         .ok_or(AppError::InvalidQueryParameter("status".to_string()))?;
-    let result = sqlx::query("UPDATE tasks SET status = ? WHERE id = ? LIMIT 1")
+    let _result = sqlx::query("UPDATE tasks SET status = ? WHERE id = ? LIMIT 1")
         .bind(status)
         .bind(id)
         .execute(&pool)
         .await?;
-    Ok(axum::Json(result.rows_affected()))
+    Ok(axum::Json(id))
 }
 
 #[derive(Clone)]
@@ -240,9 +241,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/api", axum::routing::get(|| async { "Hello, World!" }))
         .route("/api/init", axum::routing::post(init_handler))
+        .route("/api/tasks/:id", axum::routing::patch(update_task_handler))
         .route("/api/tasks", axum::routing::get(get_tasks_handler))
         .route("/api/tasks", axum::routing::post(post_task_handler))
-        .route("/api/tasks/:id", axum::routing::post(update_task_handler))
         .with_state(AppState { pool: pool.clone() });
     init(&pool, &config).await?;
     tokio::task::spawn(async {
