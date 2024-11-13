@@ -22,8 +22,8 @@ struct Task {
     id: u64,
     branch: String,
     status: String,
-    created_at: chrono::DateTime<chrono::Utc>,
-    updated_at: chrono::DateTime<chrono::Utc>,
+    created_at: chrono::DateTime<chrono::Local>,
+    updated_at: chrono::DateTime<chrono::Local>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +36,8 @@ enum AppError {
     Io(#[from] std::io::Error),
     #[error("invalid query parameter: {0}")]
     InvalidQueryParameter(String),
+    #[error("not found")]
+    NotFound,
 }
 
 impl axum::response::IntoResponse for AppError {
@@ -45,6 +47,10 @@ impl axum::response::IntoResponse for AppError {
             AppError::InvalidQueryParameter(message) => axum::http::Response::builder()
                 .status(axum::http::StatusCode::BAD_REQUEST)
                 .body(axum::body::Body::from(message))
+                .unwrap(),
+            AppError::NotFound => axum::http::Response::builder()
+                .status(axum::http::StatusCode::NOT_FOUND)
+                .body(axum::body::Body::from("Not Found"))
                 .unwrap(),
             _ => axum::http::Response::builder()
                 .status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
@@ -70,6 +76,21 @@ async fn init_handler(State(AppState { pool }): State<AppState>) -> Result<Strin
     )
     .await?;
     Ok("".to_string())
+}
+
+#[axum::debug_handler]
+async fn get_task_handler(
+    axum::extract::Path((id,)): axum::extract::Path<(u64,)>,
+    State(AppState { pool }): State<AppState>,
+) -> Result<axum::Json<Task>, AppError> {
+    let task: Option<Task> = sqlx::query_as("SELECT id, branch, status, created_at, updated_at FROM tasks WHERE id = ? LIMIT 1")
+        .bind(id)
+        .fetch_optional(&pool)
+        .await?;
+    match task {
+        Some(task) => Ok(axum::Json(task)),
+        None => Err(AppError::NotFound),
+    }
 }
 
 #[axum::debug_handler]
@@ -244,6 +265,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api", axum::routing::get(|| async { "Hello, World!" }))
         .route("/api/init", axum::routing::post(init_handler))
         .route("/api/tasks/:id", axum::routing::patch(update_task_handler))
+        .route("/api/tasks/:id", axum::routing::get(get_task_handler))
         .route("/api/tasks", axum::routing::get(get_tasks_handler))
         .route("/api/tasks", axum::routing::post(post_task_handler))
         .with_state(AppState { pool: pool.clone() });

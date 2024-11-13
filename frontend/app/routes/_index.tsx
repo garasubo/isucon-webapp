@@ -1,6 +1,6 @@
 import type { MetaFunction } from "@remix-run/node";
 import { Button, Form, Table } from "react-bootstrap";
-import { useLoaderData, useRevalidator } from "@remix-run/react";
+import {Link, Links, useLoaderData, useRevalidator} from "@remix-run/react";
 import React from "react";
 import { useInterval } from "usehooks-ts";
 
@@ -15,6 +15,8 @@ interface Task {
   id: number;
   status: string;
   branch: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface ClientData {
@@ -84,7 +86,7 @@ export default function Index() {
         {runningTask && (
             <div>
               <h1>Running Task</h1>
-              <p>Task ID: {runningTask.id}</p>
+              <p><Link to={`/task/${runningTask.id}`} >Task ID: {runningTask.id}</Link></p>
               <p>Branch: {runningTask.branch}</p>
               <p>Status: {runningTask.status}</p>
               <Button
@@ -130,20 +132,24 @@ export default function Index() {
             <th>ID</th>
             <th>Branch</th>
             <th>Status</th>
+            <th>Created At</th>
+            <th>Updated At</th>
             <th>Action</th>
           </tr>
           </thead>
           <tbody>
           {tasks.map((task) => (
               <tr key={task.id}>
-                <td>{task.id}</td>
+                <td><Link to={`/task/${task.id}`}>{task.id}</Link></td>
                 <td>{task.branch}</td>
                 <td>{task.status}</td>
+                <td>{task.created_at}</td>
+                <td>{task.updated_at}</td>
                 <td>{isTaskCancelable(task) && <Button variant="warning" onClick={() => {
                   cancelTaskThenRevalidate(task.id).catch((e) => {
                     console.error(e);
                   });
-                }}>Cancel</Button> }</td>
+                }}>Cancel</Button>}</td>
               </tr>
           ))}
           </tbody>
