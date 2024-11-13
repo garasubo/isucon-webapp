@@ -22,6 +22,8 @@ struct Task {
     id: u64,
     branch: String,
     status: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -61,8 +63,8 @@ async fn init_handler(State(AppState { pool }): State<AppState>) -> Result<Strin
             id INT PRIMARY KEY AUTO_INCREMENT,
             branch VARCHAR(255) NOT NULL,
             status CHAR(16) NOT NULL DEFAULT 'pending',
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
     ",
     )
@@ -74,7 +76,7 @@ async fn init_handler(State(AppState { pool }): State<AppState>) -> Result<Strin
 async fn get_tasks_handler(
     State(AppState { pool }): State<AppState>,
 ) -> Result<axum::Json<Vec<Task>>, AppError> {
-    let tasks: Vec<Task> = sqlx::query_as("SELECT id, branch, status FROM tasks")
+    let tasks: Vec<Task> = sqlx::query_as("SELECT id, branch, status, created_at, updated_at FROM tasks")
         .fetch_all(&pool)
         .await?;
     Ok(axum::Json(tasks))
@@ -89,7 +91,7 @@ async fn post_task_handler(
         .get("branch")
         .ok_or(AppError::InvalidQueryParameter("branch".to_string()))?;
     let result = sqlx::query(
-        "INSERT INTO tasks (branch, status, created_at, updated_at) VALUES (?, ?, NOW(), NOW())",
+        "INSERT INTO tasks (branch, status) VALUES (?, ?)",
     )
     .bind(branch)
     .bind("pending")
@@ -132,7 +134,7 @@ async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Erro
     println!("repo_directory: {:?}", repo_directory);
     loop {
         let mut tx = pool.begin().await?;
-        let going_tasks = sqlx::query_as::<_, Task>("SELECT id, branch, status FROM tasks WHERE status = 'deploying' OR status = 'deployed' LIMIT 1")
+        let going_tasks = sqlx::query_as::<_, (i64,)>("SELECT id FROM tasks WHERE status = 'deploying' OR status = 'deployed' LIMIT 1")
             .fetch_optional(&mut *tx)
             .await?;
         if let Some(task) = going_tasks {
@@ -141,7 +143,7 @@ async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Erro
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             continue;
         }
-        let task = sqlx::query_as::<_, Task>("SELECT id, branch, status FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 1 FOR UPDATE")
+        let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 1 FOR UPDATE")
             .fetch_optional(&mut *tx)
             .await?;
         let task = match task {
@@ -211,8 +213,8 @@ async fn init(pool: &MySqlPool, config: &Config) -> Result<(), AppError> {
             id INT PRIMARY KEY AUTO_INCREMENT,
             branch VARCHAR(255) NOT NULL,
             status CHAR(16) NOT NULL DEFAULT 'pending',
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
     ",
     )
