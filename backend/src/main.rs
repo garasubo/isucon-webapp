@@ -218,9 +218,15 @@ async fn task_runner(pool: MySqlPool, notify: Arc<tokio::sync::Notify>, config: 
             continue;
         }
         println!("checkout done");
+        let file_dir = Path::canonicalize(Path::new("."))?.join("file").join(task.id.to_string());
+        let _ = tokio::fs::create_dir_all(&file_dir).await;
+        let stdout = std::fs::File::create(file_dir.join("stdout"))?;
+        let stderr = std::fs::File::create(file_dir.join("stderr"))?;
         let output = tokio::process::Command::new("bash")
             .args(["-c", &config.deploy_command])
             .current_dir(&repo_directory)
+            .stdout(stdout)
+            .stderr(stderr)
             .output()
             .await?;
         if output.status.code() != Some(0) {

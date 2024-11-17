@@ -1,6 +1,6 @@
 import type { MetaFunction } from "@remix-run/node";
 import { Button, Form, Table } from "react-bootstrap";
-import {Link, Links, useLoaderData, useRevalidator} from "@remix-run/react";
+import {Link, useLoaderData, useRevalidator} from "@remix-run/react";
 import React from "react";
 import { useInterval } from "usehooks-ts";
 
@@ -97,7 +97,7 @@ export default function Index() {
   }, 10000);
 
   const cancelTaskThenRevalidate = async (id: number) => {
-    let resp = await cancelTask(id);
+    const resp = await cancelTask(id);
     console.log(resp);
     revalidator.revalidate();
   }
