@@ -1,9 +1,11 @@
+mod db;
+
 use axum::extract::{State};
 use axum::Router;
 use sqlx::mysql::{MySqlConnectOptions, MySqlPool, MySqlPoolOptions};
-use sqlx::{ConnectOptions, Executor};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, serde::Serialize, sqlx::Type)]
 #[sqlx(type_name = "enum", rename_all = "lowercase")]
@@ -22,6 +24,7 @@ struct Task {
     id: u64,
     branch: String,
     status: String,
+    score: Option<i64>,
     created_at: chrono::DateTime<chrono::Local>,
     updated_at: chrono::DateTime<chrono::Local>,
 }
@@ -61,29 +64,18 @@ impl axum::response::IntoResponse for AppError {
 }
 
 #[axum::debug_handler]
-async fn init_handler(State(AppState { pool }): State<AppState>) -> Result<String, AppError> {
-    // init database
-    pool.execute(
-        "
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            branch VARCHAR(255) NOT NULL,
-            status CHAR(16) NOT NULL DEFAULT 'pending',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
-    ",
-    )
-    .await?;
+async fn init_handler(State(AppState { pool, notify }): State<AppState>) -> Result<String, AppError> {
+    db::init_db(&pool).await?;
+    notify.notify_one();
     Ok("".to_string())
 }
 
 #[axum::debug_handler]
 async fn get_task_handler(
     axum::extract::Path((id,)): axum::extract::Path<(u64,)>,
-    State(AppState { pool }): State<AppState>,
+    State(AppState { pool, .. }): State<AppState>,
 ) -> Result<axum::Json<Task>, AppError> {
-    let task: Option<Task> = sqlx::query_as("SELECT id, branch, status, created_at, updated_at FROM tasks WHERE id = ? LIMIT 1")
+    let task: Option<Task> = sqlx::query_as("SELECT * FROM tasks WHERE id = ? LIMIT 1")
         .bind(id)
         .fetch_optional(&pool)
         .await?;
@@ -95,9 +87,9 @@ async fn get_task_handler(
 
 #[axum::debug_handler]
 async fn get_tasks_handler(
-    State(AppState { pool }): State<AppState>,
+    State(AppState { pool, .. }): State<AppState>,
 ) -> Result<axum::Json<Vec<Task>>, AppError> {
-    let tasks: Vec<Task> = sqlx::query_as("SELECT id, branch, status, created_at, updated_at FROM tasks")
+    let tasks: Vec<Task> = sqlx::query_as("SELECT * FROM tasks")
         .fetch_all(&pool)
         .await?;
     Ok(axum::Json(tasks))
@@ -105,7 +97,7 @@ async fn get_tasks_handler(
 
 #[axum::debug_handler]
 async fn post_task_handler(
-    State(AppState { pool }): State<AppState>,
+    State(AppState { pool, notify }): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<axum::Json<u64>, AppError> {
     let branch = params
@@ -118,29 +110,50 @@ async fn post_task_handler(
     .bind("pending")
     .execute(&pool)
     .await?;
+    notify.notify_one();
     Ok(axum::Json(result.last_insert_id()))
 }
 
+#[derive(serde::Deserialize, Debug)]
+struct UpdateTaskRequest {
+    status: Option<String>,
+    score: Option<i64>,
+}
+
+
 #[axum::debug_handler]
 async fn update_task_handler(
-    State(AppState { pool }): State<AppState>,
+    State(AppState { pool, notify }): State<AppState>,
     axum::extract::Path((id,)): axum::extract::Path<(u64,)>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    axum::extract::Json(request): axum::extract::Json<UpdateTaskRequest>,
 ) -> Result<axum::Json<u64>, AppError> {
-    let status = params
-        .get("status")
-        .ok_or(AppError::InvalidQueryParameter("status".to_string()))?;
-    let _result = sqlx::query("UPDATE tasks SET status = ? WHERE id = ? LIMIT 1")
-        .bind(status)
-        .bind(id)
-        .execute(&pool)
-        .await?;
+    let status = request.status;
+    let score = request.score;
+    if status.is_none() && score.is_none() {
+        return Err(AppError::InvalidQueryParameter("status or score".to_string()));
+    }
+    if let Some(score) = score {
+        let _result = sqlx::query("UPDATE tasks SET score = ? WHERE id = ? LIMIT 1")
+            .bind(score)
+            .bind(id)
+            .execute(&pool)
+            .await?;
+    }
+    if let Some(status) = status {
+        let _result = sqlx::query("UPDATE tasks SET status = ? WHERE id = ? LIMIT 1")
+            .bind(status)
+            .bind(id)
+            .execute(&pool)
+            .await?;
+    }
+    notify.notify_one();
     Ok(axum::Json(id))
 }
 
 #[derive(Clone)]
 struct AppState {
     pool: MySqlPool,
+    notify: Arc<tokio::sync::Notify>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -149,7 +162,7 @@ struct Config {
     deploy_command: String,
 }
 
-async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Error> {
+async fn task_runner(pool: MySqlPool, notify: Arc<tokio::sync::Notify>, config: Config) -> Result<(), anyhow::Error> {
 
     let repo_directory = Path::canonicalize(Path::new("."))?.join("repo");
     println!("repo_directory: {:?}", repo_directory);
@@ -161,7 +174,7 @@ async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Erro
         if let Some(task) = going_tasks {
             println!("task is going: {:?}", task);
             tx.commit().await?;
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            notify.notified().await;
             continue;
         }
         let task = sqlx::query_as::<_, Task>("SELECT * FROM tasks WHERE status = 'pending' ORDER BY id LIMIT 1 FOR UPDATE")
@@ -171,8 +184,8 @@ async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Erro
             Some(task) => task,
             None => {
                 tx.commit().await?;
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 println!("No new task found. Sleeping...");
+                notify.notified().await;
                 continue;
             }
         };
@@ -228,18 +241,7 @@ async fn task_runner(pool: MySqlPool, config: Config) -> Result<(), anyhow::Erro
 }
 
 async fn init(pool: &MySqlPool, config: &Config) -> Result<(), AppError> {
-    pool.execute(
-        "
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            branch VARCHAR(255) NOT NULL,
-            status CHAR(16) NOT NULL DEFAULT 'pending',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
-    ",
-    )
-    .await?;
+    db::init_db(pool).await?;
 
     tokio::fs::remove_dir_all("repo").await.ok();
 
@@ -261,6 +263,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .password("isucon")
         .database("webapp");
     let pool = MySqlPoolOptions::new().connect_with(options).await?;
+    let notify = Arc::new(tokio::sync::Notify::new());
     let app = Router::new()
         .route("/api", axum::routing::get(|| async { "Hello, World!" }))
         .route("/api/init", axum::routing::post(init_handler))
@@ -268,10 +271,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks/:id", axum::routing::get(get_task_handler))
         .route("/api/tasks", axum::routing::get(get_tasks_handler))
         .route("/api/tasks", axum::routing::post(post_task_handler))
-        .with_state(AppState { pool: pool.clone() });
+        .with_state(AppState { pool: pool.clone(), notify: notify.clone() });
     init(&pool, &config).await?;
     tokio::task::spawn(async {
-        if let Err(e) = task_runner(pool, config).await {
+        if let Err(e) = task_runner(pool, notify, config).await {
             eprintln!("task_runner error: {:?}", e);
         }
     });

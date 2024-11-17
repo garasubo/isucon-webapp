@@ -15,6 +15,7 @@ interface Task {
   id: number;
   status: string;
   branch: string;
+  score: number;
   created_at: string;
   updated_at: string;
 }
@@ -45,8 +46,27 @@ const submitTask = async (branch: string) => {
 };
 
 const cancelTask = async (id: number) => {
-  const response = await fetch(`/api/tasks/${id}?status=cancelled`, {
+  const response = await fetch(`/api/tasks/${id}`, {
     method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: "canceled" }),
+  });
+  if (!response.ok) {
+    console.error(`Failed to cancel task`);
+    return Promise.reject(`Failed to cancel task: ${await response.text()}`);
+  }
+  return response.json();
+};
+
+const reportScore = async (id: number, score: number) => {
+  const response = await fetch(`/api/tasks/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status: "done", score }),
   });
   if (!response.ok) {
     console.error(`Failed to cancel task`);
@@ -70,6 +90,7 @@ export default function Index() {
   const tasks = data.tasks.sort((a, b) => b.id - a.id);
   const runningTask = getRunningTask(tasks);
   const [branch, setBranch] = React.useState<string>("");
+  const [score, setScore] = React.useState<number>(0);
   const revalidator = useRevalidator();
   const _interval = useInterval(() => {
     revalidator.revalidate();
@@ -89,6 +110,26 @@ export default function Index() {
               <p><Link to={`/task/${runningTask.id}`} >Task ID: {runningTask.id}</Link></p>
               <p>Branch: {runningTask.branch}</p>
               <p>Status: {runningTask.status}</p>
+              <div>
+                <Form.Label htmlFor="inputScore">Score</Form.Label>
+                <Form.Control id="inputScore" type="number" placeholder="score" value={score} onChange={(e) => {
+                    setScore(parseInt(e.target.value));
+                }} />
+                <Button
+                    variant="primary"
+                    onClick={() => {
+                      reportScore(runningTask.id, score).then((resp) => {
+                        console.log(resp);
+                        setScore(0);
+                        revalidator.revalidate();
+                      }).catch((e) => {
+                        console.error(e);
+                      });
+                    }}
+                >
+                    Report
+                </Button>
+              </div>
               <Button
                   variant="warning"
                   onClick={() => {
@@ -132,6 +173,7 @@ export default function Index() {
             <th>ID</th>
             <th>Branch</th>
             <th>Status</th>
+            <th>Score</th>
             <th>Created At</th>
             <th>Updated At</th>
             <th>Action</th>
@@ -143,6 +185,7 @@ export default function Index() {
                 <td><Link to={`/task/${task.id}`}>{task.id}</Link></td>
                 <td>{task.branch}</td>
                 <td>{task.status}</td>
+                <td>{task.score}</td>
                 <td>{task.created_at}</td>
                 <td>{task.updated_at}</td>
                 <td>{isTaskCancelable(task) && <Button variant="warning" onClick={() => {

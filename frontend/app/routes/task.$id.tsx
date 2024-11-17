@@ -6,7 +6,7 @@ import { useInterval } from "usehooks-ts";
 
 export const meta: MetaFunction = () => {
     return [
-        { title: "ISUCON14 Deploy Server" },
+        { title: "Task Detail | ISUCON14 Deploy Server" },
         { name: "description", content: "ISUCON14 Deploy Server" },
     ];
 };
@@ -15,6 +15,7 @@ interface Task {
     id: number;
     status: string;
     branch: string;
+    score?: number;
     created_at: string;
     updated_at: string;
 }
@@ -42,6 +43,7 @@ export default function Task() {
             <div>{task.id}</div>
             <div>{task.status}</div>
             <div>{task.branch}</div>
+            <div>{task.score}</div>
             <div>{task.created_at}</div>
             <div>{task.updated_at}</div>
         </div>
