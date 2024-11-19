@@ -1,6 +1,6 @@
 import type { MetaFunction } from "@remix-run/node";
 import { Button, Form, Table } from "react-bootstrap";
-import {Link, useLoaderData, useRevalidator} from "@remix-run/react";
+import { Link, useLoaderData, useRevalidator } from "@remix-run/react";
 import React from "react";
 import { useInterval } from "usehooks-ts";
 
@@ -82,8 +82,12 @@ const getRunningTask = (tasks: Task[]): Task | undefined => {
 };
 
 const isTaskCancelable = (task: Task): boolean => {
-  return task.status === "deploying" || task.status === "deployed" || task.status === "pending";
-}
+  return (
+    task.status === "deploying" ||
+    task.status === "deployed" ||
+    task.status === "pending"
+  );
+};
 
 export default function Index() {
   const data = useLoaderData<typeof clientLoader>();
@@ -100,75 +104,87 @@ export default function Index() {
     const resp = await cancelTask(id);
     console.log(resp);
     revalidator.revalidate();
-  }
+  };
 
   return (
-      <div style={{fontFamily: "system-ui, sans-serif", lineHeight: "1.8"}}>
-        {runningTask && (
-            <div>
-              <h1>Running Task</h1>
-              <p><Link to={`/task/${runningTask.id}`} >Task ID: {runningTask.id}</Link></p>
-              <p>Branch: {runningTask.branch}</p>
-              <p>Status: {runningTask.status}</p>
-              <div>
-                <Form.Label htmlFor="inputScore">Score</Form.Label>
-                <Form.Control id="inputScore" type="number" placeholder="score" value={score} onChange={(e) => {
-                    setScore(parseInt(e.target.value));
-                }} />
-                <Button
-                    variant="primary"
-                    onClick={() => {
-                      reportScore(runningTask.id, score).then((resp) => {
-                        console.log(resp);
-                        setScore(0);
-                        revalidator.revalidate();
-                      }).catch((e) => {
-                        console.error(e);
-                      });
-                    }}
-                >
-                    Report
-                </Button>
-              </div>
-              <Button
-                  variant="warning"
-                  onClick={() => {
-                    cancelTaskThenRevalidate(runningTask.id).catch((e) => {
-                      console.error(e);
-                    });
-                  }}
-              >
-                Cancel
-              </Button>
-            </div>
-        )}
+    <div style={{ fontFamily: "system-ui, sans-serif", lineHeight: "1.8" }}>
+      {runningTask && (
         <div>
-          <Form.Label htmlFor="inputBranch">DeployするBranch</Form.Label>
-          <Form.Control
-              id="inputBranch"
-              type="text"
-              placeholder="branch"
-              value={branch}
+          <h1>Running Task</h1>
+          <p>
+            <Link to={`/task/${runningTask.id}`}>
+              Task ID: {runningTask.id}
+            </Link>
+          </p>
+          <p>Branch: {runningTask.branch}</p>
+          <p>Status: {runningTask.status}</p>
+          <div>
+            <Form.Label htmlFor="inputScore">Score</Form.Label>
+            <Form.Control
+              id="inputScore"
+              type="number"
+              placeholder="score"
+              value={score}
               onChange={(e) => {
-                setBranch(e.target.value);
+                setScore(parseInt(e.target.value));
               }}
-          />
-          <Button
+            />
+            <Button
               variant="primary"
               onClick={() => {
-                submitTask(branch).then((resp) => {
-                  console.log(resp);
-                  setBranch("");
-                  revalidator.revalidate();
-                });
+                reportScore(runningTask.id, score)
+                  .then((resp) => {
+                    console.log(resp);
+                    setScore(0);
+                    revalidator.revalidate();
+                  })
+                  .catch((e) => {
+                    console.error(e);
+                  });
               }}
+            >
+              Report
+            </Button>
+          </div>
+          <Button
+            variant="warning"
+            onClick={() => {
+              cancelTaskThenRevalidate(runningTask.id).catch((e) => {
+                console.error(e);
+              });
+            }}
           >
-            Deploy
+            Cancel
           </Button>
         </div>
-        <h1>Tasks</h1>
-        <Table>
-          <thead>
+      )}
+      <div>
+        <Form.Label htmlFor="inputBranch">DeployするBranch</Form.Label>
+        <Form.Control
+          id="inputBranch"
+          type="text"
+          placeholder="branch"
+          value={branch}
+          onChange={(e) => {
+            setBranch(e.target.value);
+          }}
+        />
+        <Button
+          variant="primary"
+          onClick={() => {
+            submitTask(branch).then((resp) => {
+              console.log(resp);
+              setBranch("");
+              revalidator.revalidate();
+            });
+          }}
+        >
+          Deploy
+        </Button>
+      </div>
+      <h1>Tasks</h1>
+      <Table>
+        <thead>
           <tr>
             <th>ID</th>
             <th>Branch</th>
@@ -178,41 +194,52 @@ export default function Index() {
             <th>Updated At</th>
             <th>Action</th>
           </tr>
-          </thead>
-          <tbody>
+        </thead>
+        <tbody>
           {tasks.map((task) => (
-              <tr key={task.id}>
-                <td><Link to={`/task/${task.id}`}>{task.id}</Link></td>
-                <td>{task.branch}</td>
-                <td>{task.status}</td>
-                <td>{task.score}</td>
-                <td>{task.created_at}</td>
-                <td>{task.updated_at}</td>
-                <td>{isTaskCancelable(task) && <Button variant="warning" onClick={() => {
-                  cancelTaskThenRevalidate(task.id).catch((e) => {
-                    console.error(e);
-                  });
-                }}>Cancel</Button>}</td>
-              </tr>
+            <tr key={task.id}>
+              <td>
+                <Link to={`/task/${task.id}`}>{task.id}</Link>
+              </td>
+              <td>{task.branch}</td>
+              <td>{task.status}</td>
+              <td>{task.score}</td>
+              <td>{task.created_at}</td>
+              <td>{task.updated_at}</td>
+              <td>
+                {isTaskCancelable(task) && (
+                  <Button
+                    variant="warning"
+                    onClick={() => {
+                      cancelTaskThenRevalidate(task.id).catch((e) => {
+                        console.error(e);
+                      });
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                )}
+              </td>
+            </tr>
           ))}
-          </tbody>
-        </Table>
-        <ul>
-          <li>
-            <a target="_blank" href="https://portal.isucon.net/" rel="noreferrer">
-              ISUCON Portal
-            </a>
-          </li>
-          <li>
-            <a
-                target="_blank"
-                href="https://githum.com/garasubo/isucon14"
-                rel="noreferrer"
-            >
-              Our GitHub Repo
-            </a>
-          </li>
-        </ul>
-      </div>
+        </tbody>
+      </Table>
+      <ul>
+        <li>
+          <a target="_blank" href="https://portal.isucon.net/" rel="noreferrer">
+            ISUCON Portal
+          </a>
+        </li>
+        <li>
+          <a
+            target="_blank"
+            href="https://githum.com/garasubo/isucon14"
+            rel="noreferrer"
+          >
+            Our GitHub Repo
+          </a>
+        </li>
+      </ul>
+    </div>
   );
 }

@@ -29,6 +29,14 @@ struct Task {
     updated_at: chrono::DateTime<chrono::Local>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct TaskDetail {
+    #[serde(flatten)]
+    task: Task,
+    stdout: Option<String>,
+    stderr: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 enum AppError {
     #[error(transparent)]
@@ -74,14 +82,22 @@ async fn init_handler(State(AppState { pool, notify }): State<AppState>) -> Resu
 async fn get_task_handler(
     axum::extract::Path((id,)): axum::extract::Path<(u64,)>,
     State(AppState { pool, .. }): State<AppState>,
-) -> Result<axum::Json<Task>, AppError> {
+) -> Result<axum::Json<TaskDetail>, AppError> {
     let task: Option<Task> = sqlx::query_as("SELECT * FROM tasks WHERE id = ? LIMIT 1")
         .bind(id)
         .fetch_optional(&pool)
         .await?;
-    match task {
-        Some(task) => Ok(axum::Json(task)),
-        None => Err(AppError::NotFound),
+    if let Some(task) = task {
+        let file_dir = Path::canonicalize(Path::new("."))?.join("file").join(task.id.to_string());
+        let stdout = std::fs::read_to_string(file_dir.join("stdout")).ok();
+        let stderr = std::fs::read_to_string(file_dir.join("stderr")).ok();
+        Ok(axum::Json(TaskDetail {
+            task,
+            stdout,
+            stderr,
+        }))
+    } else {
+        Err(AppError::NotFound)
     }
 }
 
@@ -220,17 +236,18 @@ async fn task_runner(pool: MySqlPool, notify: Arc<tokio::sync::Notify>, config: 
         println!("checkout done");
         let file_dir = Path::canonicalize(Path::new("."))?.join("file").join(task.id.to_string());
         let _ = tokio::fs::create_dir_all(&file_dir).await;
+        println!("file_dir: {:?}", file_dir);
         let stdout = std::fs::File::create(file_dir.join("stdout"))?;
         let stderr = std::fs::File::create(file_dir.join("stderr"))?;
-        let output = tokio::process::Command::new("bash")
+        let status = tokio::process::Command::new("bash")
             .args(["-c", &config.deploy_command])
             .current_dir(&repo_directory)
             .stdout(stdout)
             .stderr(stderr)
-            .output()
+            .status()
             .await?;
-        if output.status.code() != Some(0) {
-            eprintln!("deploy failed: {:?}", String::from_utf8_lossy(&output.stderr));
+        if status.code() != Some(0) {
+            eprintln!("deploy failed: {:?}", status);
             sqlx::query("UPDATE tasks SET status = 'deploy_failed' WHERE id = ?")
                 .bind(task.id)
                 .execute(&pool)
