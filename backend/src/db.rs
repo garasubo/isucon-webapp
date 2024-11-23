@@ -13,6 +13,6 @@ pub async fn init_db(pool: &MySqlPool) -> Result<(), sqlx::Error> {
         )
     ",
     )
-        .await?;
+    .await?;
     Ok(())
 }

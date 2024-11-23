@@ -60,7 +60,27 @@ const cancelTask = async (id: number) => {
   return response.json();
 };
 
-const reportScore = async (id: number, score: number) => {
+const reportScore = async (
+  id: number,
+  score: number,
+  files: FileList | null
+) => {
+  if (files) {
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append(files[i].name, files[i]);
+    }
+    const response = await fetch(`/api/tasks/${id}/files`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!response.ok) {
+      console.error(`Failed to upload access logs`);
+      return Promise.reject(
+        `Failed to upload access logs: ${await response.text()}`
+      );
+    }
+  }
   const response = await fetch(`/api/tasks/${id}`, {
     method: "PATCH",
     headers: {
@@ -95,6 +115,7 @@ export default function Index() {
   const runningTask = getRunningTask(tasks);
   const [branch, setBranch] = React.useState<string>("");
   const [score, setScore] = React.useState<number>(0);
+  const [files, setFiles] = React.useState<FileList | null>(null);
   const revalidator = useRevalidator();
   const _interval = useInterval(() => {
     revalidator.revalidate();
@@ -109,7 +130,7 @@ export default function Index() {
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", lineHeight: "1.8" }}>
       {runningTask && (
-        <div>
+        <div className="running-task">
           <h1>Running Task</h1>
           <p>
             <Link to={`/task/${runningTask.id}`}>
@@ -118,34 +139,44 @@ export default function Index() {
           </p>
           <p>Branch: {runningTask.branch}</p>
           <p>Status: {runningTask.status}</p>
-          <div>
-            <Form.Label htmlFor="inputScore">Score</Form.Label>
-            <Form.Control
-              id="inputScore"
-              type="number"
-              placeholder="score"
-              value={score}
-              onChange={(e) => {
-                setScore(parseInt(e.target.value));
-              }}
-            />
-            <Button
-              variant="primary"
-              onClick={() => {
-                reportScore(runningTask.id, score)
-                  .then((resp) => {
-                    console.log(resp);
-                    setScore(0);
-                    revalidator.revalidate();
-                  })
-                  .catch((e) => {
-                    console.error(e);
-                  });
-              }}
-            >
-              Report
-            </Button>
-          </div>
+          {runningTask.status === "deployed" && (
+            <div>
+              <Form.Label htmlFor="inputScore">Score</Form.Label>
+              <Form.Control
+                id="inputScore"
+                type="number"
+                placeholder="score"
+                value={score}
+                onChange={(e) => {
+                  setScore(parseInt(e.target.value));
+                }}
+              />
+              <input
+                type="file"
+                placeholder="Upload access.log"
+                onChange={(e) => {
+                  setFiles(e.target.files);
+                }}
+                multiple={true}
+              />
+              <Button
+                variant="primary"
+                onClick={() => {
+                  reportScore(runningTask.id, score, files)
+                    .then((resp) => {
+                      console.log(resp);
+                      setScore(0);
+                      revalidator.revalidate();
+                    })
+                    .catch((e) => {
+                      console.error(e);
+                    });
+                }}
+              >
+                Report
+              </Button>
+            </div>
+          )}
           <Button
             variant="warning"
             onClick={() => {

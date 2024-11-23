@@ -1,12 +1,6 @@
-import type { MetaFunction } from "@remix-run/node";
-import { Button, Form, Table } from "react-bootstrap";
-import {
-  ClientLoaderFunctionArgs,
-  useLoaderData,
-  useRevalidator,
-} from "@remix-run/react";
 import React from "react";
-import { useInterval } from "usehooks-ts";
+import type { MetaFunction } from "@remix-run/node";
+import { ClientLoaderFunctionArgs, useLoaderData } from "@remix-run/react";
 
 export const meta: MetaFunction = () => {
   return [
@@ -22,6 +16,8 @@ interface Task {
   score?: number;
   stdout?: string;
   stderr?: string;
+  alp_log?: string;
+  slow_log?: string;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +49,18 @@ export default function Task() {
       <div>Branch: {task.branch}</div>
       <div>Score: {task.score}</div>
       <div>Created At: {task.created_at}</div>
+      {task.alp_log && (
+        <div className="task-alp-log">
+          <h2>alp log</h2>
+          <pre>{task.alp_log}</pre>
+        </div>
+      )}
+      {task.slow_log && (
+        <div className="task-slow-log">
+          <h2>slow log</h2>
+          <pre>{task.slow_log}</pre>
+        </div>
+      )}
       {task.stdout && (
         <div className="task-stdout">
           <h2>stdout</h2>
