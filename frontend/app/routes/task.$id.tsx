@@ -1,6 +1,11 @@
 import React from "react";
 import type { MetaFunction } from "@remix-run/node";
-import { ClientLoaderFunctionArgs, useLoaderData } from "@remix-run/react";
+import {
+  ClientLoaderFunctionArgs,
+  useLoaderData,
+  useRevalidator,
+} from "@remix-run/react";
+import { useInterval } from "usehooks-ts";
 
 export const meta: MetaFunction = () => {
   return [
@@ -41,6 +46,10 @@ export const clientLoader = async ({
 export default function Task() {
   const data = useLoaderData<typeof clientLoader>();
   const task = data.task;
+  const revalidator = useRevalidator();
+  const _interval = useInterval(() => {
+    revalidator.revalidate();
+  }, 1000);
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", lineHeight: "1.8" }}>

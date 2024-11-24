@@ -119,7 +119,7 @@ export default function Index() {
   const revalidator = useRevalidator();
   const _interval = useInterval(() => {
     revalidator.revalidate();
-  }, 10000);
+  }, 1000);
 
   const cancelTaskThenRevalidate = async (id: number) => {
     const resp = await cancelTask(id);
