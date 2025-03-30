@@ -1,10 +1,6 @@
 import React from "react";
-import type { MetaFunction } from "@remix-run/node";
-import {
-  ClientLoaderFunctionArgs,
-  useLoaderData,
-  useRevalidator,
-} from "@remix-run/react";
+import type { MetaFunction } from "react-router";
+import { ClientLoaderFunctionArgs, useLoaderData, useRevalidator } from "react-router";
 import { useInterval } from "usehooks-ts";
 
 export const meta: MetaFunction = () => {

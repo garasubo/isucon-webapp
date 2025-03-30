@@ -1,6 +1,6 @@
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "react-router";
 import { Button, Form, Table } from "react-bootstrap";
-import { Link, useLoaderData, useRevalidator } from "@remix-run/react";
+import { Link, useLoaderData, useRevalidator } from "react-router";
 import React from "react";
 import { useInterval } from "usehooks-ts";
 

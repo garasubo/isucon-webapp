@@ -87,6 +87,7 @@ async fn init_handler(
     Ok("".to_string())
 }
 
+// TODO: SSE化
 #[axum::debug_handler]
 async fn get_running_task_handler(
     State(AppState { pool, .. }): State<AppState>,
@@ -347,7 +348,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
     let config = envy::from_env::<Config>()?;
     let options = MySqlConnectOptions::new()
-        .host("localhost")
+        .host(
+            std::env::var("MYSQL_HOST")
+                .unwrap_or("localhost".to_string())
+                .as_str(),
+        )
         .port(
             std::env::var("MYSQL_PORT")
                 .unwrap_or("3306".to_string())
