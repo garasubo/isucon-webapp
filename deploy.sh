@@ -17,6 +17,7 @@ popd
 
 # deploy frontend
 pushd frontend
+npm ci
 npm run build
 rsync -avr --delete ./dist/ "${HOST}":/var/www/isucon-webapp
 popd
