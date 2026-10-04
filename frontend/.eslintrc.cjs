@@ -19,7 +19,6 @@ module.exports = {
     commonjs: true,
     es6: true,
   },
-  ignorePatterns: ["!**/.server", "!**/.client"],
 
   // Base config
   extends: ["eslint:recommended"],
@@ -39,11 +38,7 @@ module.exports = {
         react: {
           version: "detect",
         },
-        formComponents: ["Form"],
-        linkComponents: [
-          { name: "Link", linkAttribute: "to" },
-          { name: "NavLink", linkAttribute: "to" },
-        ],
+        linkComponents: [{ name: "Link", linkAttribute: "href" }],
         "import/resolver": {
           typescript: {},
         },

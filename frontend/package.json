@@ -4,29 +4,27 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "remix vite:build",
-    "dev": "remix vite:dev",
+    "build": "tsc && vite build",
+    "dev": "vite",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
     "preview": "vite preview",
     "typecheck": "tsc",
-    "format": "prettier --write ./app/**/*.{ts,tsx}"
+    "format": "prettier --write ./src/**/*.{ts,tsx}"
   },
   "dependencies": {
-    "@remix-run/node": "^2.17.5",
-    "@remix-run/react": "^2.17.5",
     "bootstrap": "^5.3.8",
-    "isbot": "^4.4.0",
     "react": "^18.3.1",
     "react-bootstrap": "^2.10.10",
     "react-dom": "^18.3.1",
-    "usehooks-ts": "^3.1.1"
+    "usehooks-ts": "^3.1.1",
+    "wouter": "^3.13.0"
   },
   "devDependencies": {
-    "@remix-run/dev": "^2.17.5",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "@typescript-eslint/eslint-plugin": "^6.21.0",
     "@typescript-eslint/parser": "^6.21.0",
+    "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.5.4",
     "eslint": "^8.57.1",
     "eslint-import-resolver-typescript": "^3.6.3",

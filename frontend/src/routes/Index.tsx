@@ -1,15 +1,7 @@
-import type { MetaFunction } from "@remix-run/node";
 import { Button, Form, Table } from "react-bootstrap";
-import { Link, useLoaderData, useRevalidator } from "@remix-run/react";
+import { Link } from "wouter";
 import React from "react";
-import { useInterval } from "usehooks-ts";
-
-export const meta: MetaFunction = () => {
-  return [
-    { title: "ISUCON14 Deploy Server" },
-    { name: "description", content: "ISUCON14 Deploy Server" },
-  ];
-};
+import { usePolling } from "~/hooks/usePolling";
 
 interface Task {
   id: number;
@@ -20,18 +12,12 @@ interface Task {
   updated_at: string;
 }
 
-interface ClientData {
-  tasks: Task[];
-}
-
-export const clientLoader = async (): Promise<ClientData> => {
+const fetchTasks = async (): Promise<Task[]> => {
   const response = await fetch(`/api/tasks`);
-
-  const json = await response.json();
-  console.log(json);
-  return {
-    tasks: json,
-  };
+  if (!response.ok) {
+    throw new Error(`Failed to fetch tasks: ${await response.text()}`);
+  }
+  return response.json();
 };
 
 const submitTask = async (branch: string) => {
@@ -110,22 +96,26 @@ const isTaskCancelable = (task: Task): boolean => {
 };
 
 export default function Index() {
-  const data = useLoaderData<typeof clientLoader>();
-  const tasks = data.tasks.sort((a, b) => b.id - a.id);
+  const { data, refresh } = usePolling(fetchTasks, 1000);
+  const tasks = [...(data ?? [])].sort((a, b) => b.id - a.id);
   const runningTask = getRunningTask(tasks);
   const [branch, setBranch] = React.useState<string>("");
   const [score, setScore] = React.useState<number>(0);
   const [files, setFiles] = React.useState<FileList | null>(null);
-  const revalidator = useRevalidator();
-  const _interval = useInterval(() => {
-    revalidator.revalidate();
-  }, 1000);
+
+  React.useEffect(() => {
+    document.title = "ISUCON14 Deploy Server";
+  }, []);
 
   const cancelTaskThenRevalidate = async (id: number) => {
     const resp = await cancelTask(id);
     console.log(resp);
-    revalidator.revalidate();
+    refresh();
   };
+
+  if (!data) {
+    return <p>Loading...</p>;
+  }
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", lineHeight: "1.8" }}>
@@ -133,7 +123,7 @@ export default function Index() {
         <div className="running-task">
           <h1>Running Task</h1>
           <p>
-            <Link to={`/task/${runningTask.id}`}>
+            <Link href={`/task/${runningTask.id}`}>
               Task ID: {runningTask.id}
             </Link>
           </p>
@@ -166,7 +156,7 @@ export default function Index() {
                     .then((resp) => {
                       console.log(resp);
                       setScore(0);
-                      revalidator.revalidate();
+                      refresh();
                     })
                     .catch((e) => {
                       console.error(e);
@@ -206,7 +196,7 @@ export default function Index() {
             submitTask(branch).then((resp) => {
               console.log(resp);
               setBranch("");
-              revalidator.revalidate();
+              refresh();
             });
           }}
         >
@@ -230,7 +220,7 @@ export default function Index() {
           {tasks.map((task) => (
             <tr key={task.id}>
               <td>
-                <Link to={`/task/${task.id}`}>{task.id}</Link>
+                <Link href={`/task/${task.id}`}>{task.id}</Link>
               </td>
               <td>{task.branch}</td>
               <td>{task.status}</td>

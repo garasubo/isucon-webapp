@@ -1,18 +1,6 @@
 import React from "react";
-import type { MetaFunction } from "@remix-run/node";
-import {
-  ClientLoaderFunctionArgs,
-  useLoaderData,
-  useRevalidator,
-} from "@remix-run/react";
-import { useInterval } from "usehooks-ts";
-
-export const meta: MetaFunction = () => {
-  return [
-    { title: "Task Detail | ISUCON14 Deploy Server" },
-    { name: "description", content: "ISUCON14 Deploy Server" },
-  ];
-};
+import { useParams } from "wouter";
+import { usePolling } from "~/hooks/usePolling";
 
 interface Task {
   id: number;
@@ -27,29 +15,25 @@ interface Task {
   updated_at: string;
 }
 
-interface ClientData {
-  task: Task;
-}
-
-export const clientLoader = async ({
-  params,
-}: ClientLoaderFunctionArgs): Promise<ClientData> => {
-  const response = await fetch(`/api/tasks/${params.id}`);
-
-  const json = await response.json();
-  console.log(json);
-  return {
-    task: json,
-  };
+const fetchTask = async (id: string): Promise<Task> => {
+  const response = await fetch(`/api/tasks/${id}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch task: ${await response.text()}`);
+  }
+  return response.json();
 };
 
 export default function Task() {
-  const data = useLoaderData<typeof clientLoader>();
-  const task = data.task;
-  const revalidator = useRevalidator();
-  const _interval = useInterval(() => {
-    revalidator.revalidate();
-  }, 1000);
+  const { id } = useParams<{ id: string }>();
+  const { data: task } = usePolling(() => fetchTask(id), 1000);
+
+  React.useEffect(() => {
+    document.title = "Task Detail | ISUCON14 Deploy Server";
+  }, []);
+
+  if (!task) {
+    return <p>Loading...</p>;
+  }
 
   return (
     <div style={{ fontFamily: "system-ui, sans-serif", lineHeight: "1.8" }}>
