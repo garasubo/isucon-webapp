@@ -1,9 +1,10 @@
 import React from "react";
 import { Link, useParams } from "wouter";
 import { type TaskDetail, fetchTask } from "~/api";
+import LoadError from "~/components/LoadError";
 import StatusBadge from "~/components/StatusBadge";
 import { ArrowLeftIcon, CopyIcon, DownloadIcon } from "~/components/icons";
-import { cardClass, secondaryButtonClass } from "~/components/ui";
+import { cardClass, pageClass, secondaryButtonClass } from "~/components/ui";
 import { usePolling } from "~/hooks/usePolling";
 import { formatDateTime, formatDuration, formatScore } from "~/lib/format";
 
@@ -139,14 +140,20 @@ function LogViewer({ task }: { task: TaskDetail }) {
 
 export default function Task() {
   const { id } = useParams<{ id: string }>();
-  const { data: task } = usePolling(() => fetchTask(id), 1000);
+  const { data: task, error } = usePolling(() => fetchTask(id), 1000);
 
   React.useEffect(() => {
     document.title = `タスク#${id} | ISUCON14 Deploy Server`;
   }, [id]);
 
   if (!task) {
-    return <p className="px-gutter py-8 text-muted">読み込み中…</p>;
+    return error ? (
+      <main className={pageClass}>
+        <LoadError message={error} />
+      </main>
+    ) : (
+      <p className="px-gutter py-8 text-muted">読み込み中…</p>
+    );
   }
 
   const registered = LOGS.filter((log) => task[log.key] != null).length;
@@ -160,6 +167,8 @@ export default function Task() {
         <ArrowLeftIcon />
         タスク一覧に戻る
       </Link>
+
+      {error && <LoadError message={error} />}
 
       <section
         className={`${cardClass} flex flex-wrap items-end justify-between gap-x-8 gap-y-5 p-6`}

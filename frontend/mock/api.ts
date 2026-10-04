@@ -98,6 +98,11 @@ const tasks: MockTask[] = [
   }),
 ];
 let nextId = tasks.length + 1;
+
+// `npm run dev:mock:config-error` mimics a backend started without its .env.
+const CONFIG_ERROR = process.env.MOCK_CONFIG_ERROR
+  ? "configuration error: missing value for field app_repository. Check backend .env"
+  : undefined;
 const deployStartedAt = new Map<number, number>();
 
 // Mimics task_runner: run one pending task at a time.
@@ -156,6 +161,7 @@ const handle = async (req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname.replace(/\/$/, "");
   const method = req.method ?? "GET";
+  if (CONFIG_ERROR) return sendError(res, 503, CONFIG_ERROR);
   const idMatch = path.match(/^\/api\/tasks\/(\d+)(\/files)?$/);
   const task = idMatch ? tasks.find((t) => t.id === Number(idMatch[1])) : undefined;
 

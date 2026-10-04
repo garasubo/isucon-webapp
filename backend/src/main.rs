@@ -56,11 +56,16 @@ enum AppError {
     Multipart(#[from] axum::extract::multipart::MultipartError),
     #[error("not found")]
     NotFound,
+    #[error("configuration error: {0}")]
+    Config(String),
 }
 
 impl axum::response::IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response<axum::body::Body> {
-        eprintln!("error: {:?}", self);
+        // Config errors are logged once at startup, not on every polled request.
+        if !matches!(self, AppError::Config(_)) {
+            eprintln!("error: {:?}", self);
+        }
         match self {
             AppError::InvalidQueryParameter(message) => axum::http::Response::builder()
                 .status(axum::http::StatusCode::BAD_REQUEST)
@@ -69,6 +74,10 @@ impl axum::response::IntoResponse for AppError {
             AppError::NotFound => axum::http::Response::builder()
                 .status(axum::http::StatusCode::NOT_FOUND)
                 .body(axum::body::Body::from("Not Found"))
+                .unwrap(),
+            AppError::Config(_) => axum::http::Response::builder()
+                .status(axum::http::StatusCode::SERVICE_UNAVAILABLE)
+                .body(axum::body::Body::from(self.to_string()))
                 .unwrap(),
             _ => axum::http::Response::builder()
                 .status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
@@ -80,7 +89,7 @@ impl axum::response::IntoResponse for AppError {
 
 #[axum::debug_handler]
 async fn init_handler(
-    State(AppState { pool, notify }): State<AppState>,
+    State(AppState { pool, notify, .. }): State<AppState>,
 ) -> Result<String, AppError> {
     db::init_db(&pool).await?;
     notify.notify_one();
@@ -153,7 +162,7 @@ async fn get_tasks_handler(
 
 #[axum::debug_handler]
 async fn post_task_handler(
-    State(AppState { pool, notify }): State<AppState>,
+    State(AppState { pool, notify, .. }): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<axum::Json<u64>, AppError> {
     let branch = params
@@ -176,7 +185,7 @@ struct UpdateTaskRequest {
 
 #[axum::debug_handler]
 async fn update_task_handler(
-    State(AppState { pool, notify }): State<AppState>,
+    State(AppState { pool, notify, .. }): State<AppState>,
     axum::extract::Path((id,)): axum::extract::Path<(u64,)>,
     axum::extract::Json(request): axum::extract::Json<UpdateTaskRequest>,
 ) -> Result<axum::Json<u64>, AppError> {
@@ -225,6 +234,19 @@ async fn upload_file_handler(
 struct AppState {
     pool: MySqlPool,
     notify: Arc<tokio::sync::Notify>,
+    /// Set when the config (.env) could not be loaded; every API then fails with it.
+    config_error: Option<Arc<str>>,
+}
+
+async fn require_config(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, AppError> {
+    if let Some(message) = state.config_error {
+        return Err(AppError::Config(message.to_string()));
+    }
+    Ok(next.run(request).await)
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -345,7 +367,11 @@ async fn init(pool: &MySqlPool, config: &Config) -> Result<(), AppError> {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
-    let config = envy::from_env::<Config>()?;
+    let config = envy::from_env::<Config>().map_err(|e| {
+        let message = format!("{}. Check backend .env", e);
+        eprintln!("configuration error: {}", message);
+        message
+    });
     let options = MySqlConnectOptions::new()
         .host("localhost")
         .port(
@@ -359,6 +385,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .database("webapp");
     let pool = MySqlPoolOptions::new().connect_with(options).await?;
     let notify = Arc::new(tokio::sync::Notify::new());
+    let state = AppState {
+        pool: pool.clone(),
+        notify: notify.clone(),
+        config_error: config.as_ref().err().map(|e| e.as_str().into()),
+    };
     let app = Router::new()
         .route("/api", axum::routing::get(|| async { "Hello, World!" }))
         .route("/api/init", axum::routing::post(init_handler))
@@ -374,16 +405,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tasks/:id", axum::routing::get(get_task_handler))
         .route("/api/tasks", axum::routing::get(get_tasks_handler))
         .route("/api/tasks", axum::routing::post(post_task_handler))
-        .with_state(AppState {
-            pool: pool.clone(),
-            notify: notify.clone(),
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_config,
+        ))
+        .with_state(state);
+    // Without a config there is no repository to clone or deploy, so only serve the error.
+    if let Ok(config) = config {
+        init(&pool, &config).await?;
+        tokio::task::spawn(async {
+            if let Err(e) = task_runner(pool, notify, config).await {
+                eprintln!("task_runner error: {:?}", e);
+            }
         });
-    init(&pool, &config).await?;
-    tokio::task::spawn(async {
-        if let Err(e) = task_runner(pool, notify, config).await {
-            eprintln!("task_runner error: {:?}", e);
-        }
-    });
+    }
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
 
     axum::serve(listener, app).await.unwrap();

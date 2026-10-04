@@ -11,6 +11,7 @@ import {
   submitTask,
 } from "~/api";
 import StatusBadge from "~/components/StatusBadge";
+import LoadError from "~/components/LoadError";
 import { PlusIcon, UploadIcon } from "~/components/icons";
 import {
   cancelButtonClass,
@@ -575,14 +576,20 @@ function TaskHistory({
 }
 
 export default function Index() {
-  const { data, refresh } = usePolling(fetchTasks, 1000);
+  const { data, error, refresh } = usePolling(fetchTasks, 1000);
 
   React.useEffect(() => {
     document.title = "タスク一覧 | ISUCON14 Deploy Server";
   }, []);
 
   if (!data) {
-    return <p className="px-gutter py-8 text-muted">読み込み中…</p>;
+    return error ? (
+      <main className={pageClass}>
+        <LoadError message={error} />
+      </main>
+    ) : (
+      <p className="px-gutter py-8 text-muted">読み込み中…</p>
+    );
   }
 
   const tasks = [...data].sort((a, b) => b.id - a.id);
@@ -594,6 +601,7 @@ export default function Index() {
   return (
     <main className={pageClass}>
       <h1 className="sr-only">タスク一覧</h1>
+      {error && <LoadError message={error} />}
       <div className="flex flex-wrap items-start gap-6">
         {runningTask ? (
           // Remount per task so the report form starts empty.
