@@ -1,10 +1,10 @@
 import React from "react";
 import { Link } from "wouter";
 import {
+  TASKS_STREAM_URL,
   type Task,
   cancelTask,
   errorMessage,
-  fetchTasks,
   isCancelable,
   isRunning,
   reportScore,
@@ -22,7 +22,7 @@ import {
   primaryButtonClass,
   sectionLabelClass,
 } from "~/components/ui";
-import { usePolling } from "~/hooks/usePolling";
+import { useEventStream } from "~/hooks/useEventStream";
 import {
   formatRelative,
   formatScore,
@@ -49,13 +49,7 @@ const TaskIdLink = ({ id }: { id: number }) => (
   </Link>
 );
 
-function ReportForm({
-  taskId,
-  onReported,
-}: {
-  taskId: number;
-  onReported: () => void;
-}) {
+function ReportForm({ taskId }: { taskId: number }) {
   const [score, setScore] = React.useState("");
   const [files, setFiles] = React.useState<File[]>([]);
   const [dragging, setDragging] = React.useState(false);
@@ -66,7 +60,6 @@ function ReportForm({
     e.preventDefault();
     setSubmitting(true);
     reportScore(taskId, Number(score), files)
-      .then(onReported)
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setSubmitting(false));
   };
@@ -170,13 +163,7 @@ function ReportForm({
   );
 }
 
-function RunningTaskCard({
-  task,
-  onChange,
-}: {
-  task: Task;
-  onChange: () => void;
-}) {
+function RunningTaskCard({ task }: { task: Task }) {
   const [error, setError] = React.useState<string>();
   const deployed = task.status === "deployed";
   const currentStep = deployed ? 2 : 1;
@@ -207,9 +194,7 @@ function RunningTaskCard({
           <button
             type="button"
             onClick={() => {
-              cancelTask(task.id)
-                .then(onChange)
-                .catch((e) => setError(errorMessage(e)));
+              cancelTask(task.id).catch((e) => setError(errorMessage(e)));
             }}
             className={`${cancelButtonClass} min-h-11 px-4 text-sm`}
           >
@@ -246,7 +231,7 @@ function RunningTaskCard({
         </ol>
       </div>
       {deployed ? (
-        <ReportForm taskId={task.id} onReported={onChange} />
+        <ReportForm taskId={task.id} />
       ) : (
         <p className="m-0 border-t border-line-soft bg-[#FAFBFC] px-6 py-4 text-[13px] text-muted">
           デプロイが終わると、ここからベンチマーク結果を報告できます。
@@ -271,13 +256,7 @@ const IdleCard = () => (
   </section>
 );
 
-function DeployCard({
-  pendingTasks,
-  onSubmitted,
-}: {
-  pendingTasks: Task[];
-  onSubmitted: () => void;
-}) {
+function DeployCard({ pendingTasks }: { pendingTasks: Task[] }) {
   const [branch, setBranch] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string>();
@@ -289,7 +268,6 @@ function DeployCard({
       .then(() => {
         setBranch("");
         setError(undefined);
-        onSubmitted();
       })
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setSubmitting(false));
@@ -424,13 +402,7 @@ type FilterId = (typeof FILTERS)[number]["id"];
 const HISTORY_COLUMNS =
   "grid grid-cols-[80px_minmax(200px,1.6fr)_140px_110px_150px_150px_120px] items-center px-6";
 
-function TaskHistory({
-  tasks,
-  onChange,
-}: {
-  tasks: Task[];
-  onChange: () => void;
-}) {
+function TaskHistory({ tasks }: { tasks: Task[] }) {
   const [filterId, setFilterId] = React.useState<FilterId>("all");
   const [error, setError] = React.useState<string>();
   const filter = FILTERS.find((f) => f.id === filterId) ?? FILTERS[0];
@@ -555,10 +527,7 @@ function TaskHistory({
                     type="button"
                     onClick={() => {
                       cancelTask(task.id)
-                        .then(() => {
-                          setError(undefined);
-                          onChange();
-                        })
+                        .then(() => setError(undefined))
                         .catch((e) => setError(errorMessage(e)));
                     }}
                     className={cancelButtonClass}
@@ -576,7 +545,7 @@ function TaskHistory({
 }
 
 export default function Index() {
-  const { data, error, refresh } = usePolling(fetchTasks, 1000);
+  const { data, error } = useEventStream<Task[]>(TASKS_STREAM_URL);
 
   React.useEffect(() => {
     document.title = "タスク一覧 | ISUCON14 Deploy Server";
@@ -605,20 +574,16 @@ export default function Index() {
       <div className="flex flex-wrap items-start gap-6">
         {runningTask ? (
           // Remount per task so the report form starts empty.
-          <RunningTaskCard
-            key={runningTask.id}
-            task={runningTask}
-            onChange={refresh}
-          />
+          <RunningTaskCard key={runningTask.id} task={runningTask} />
         ) : (
           <IdleCard />
         )}
         <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-6">
-          <DeployCard pendingTasks={pendingTasks} onSubmitted={refresh} />
+          <DeployCard pendingTasks={pendingTasks} />
           <BestScoreCard tasks={tasks} />
         </div>
       </div>
-      <TaskHistory tasks={tasks} onChange={refresh} />
+      <TaskHistory tasks={tasks} />
     </main>
   );
 }

@@ -37,9 +37,15 @@ export default function Header() {
           </span>
         </Link>
         <nav
-          aria-label="外部リンク"
+          aria-label="リンク"
           className="flex flex-wrap items-center gap-x-5 text-sm"
         >
+          <Link
+            href="/ssh-keys"
+            className="inline-flex min-h-11 items-center text-[#E3E7FF] no-underline hover:text-white"
+          >
+            SSH公開鍵
+          </Link>
           <ExternalLink href="https://portal.isucon.net/">
             ISUCON Portal
           </ExternalLink>

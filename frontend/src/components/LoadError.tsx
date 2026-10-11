@@ -1,4 +1,4 @@
-// Shown when polling the backend fails, e.g. 503 because backend/.env is missing.
+// Shown when loading from the backend fails, e.g. 503 because backend/.env is missing.
 export default function LoadError({ message }: { message: string }) {
   return (
     <section

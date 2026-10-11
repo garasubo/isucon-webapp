@@ -2,6 +2,7 @@ import { Link, Route, Switch } from "wouter";
 import Header from "./components/Header";
 import { cardClass, pageClass } from "./components/ui";
 import Index from "./routes/Index";
+import SshKeys from "./routes/SshKeys";
 import Task from "./routes/Task";
 
 const NotFound = () => (
@@ -24,6 +25,7 @@ export default function App() {
       <Header />
       <Switch>
         <Route path="/" component={Index} />
+        <Route path="/ssh-keys" component={SshKeys} />
         <Route path="/task/:id">
           {/* Remount per id so a stale task isn't shown while loading */}
           {(params) => <Task key={params.id} />}

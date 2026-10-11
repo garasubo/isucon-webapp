@@ -21,17 +21,10 @@ const ensureOk = async (response: Response, message: string) => {
   return response;
 };
 
-export const fetchTasks = async (): Promise<Task[]> => {
-  const response = await fetch(`/api/tasks`);
-  await ensureOk(response, "Failed to fetch tasks");
-  return response.json();
-};
+// Server-sent event streams of Task[] / TaskDetail snapshots.
+export const TASKS_STREAM_URL = "/api/tasks/stream";
 
-export const fetchTask = async (id: string): Promise<TaskDetail> => {
-  const response = await fetch(`/api/tasks/${id}`);
-  await ensureOk(response, "Failed to fetch task");
-  return response.json();
-};
+export const taskStreamUrl = (id: string) => `/api/tasks/${id}/stream`;
 
 export const submitTask = async (branch: string) => {
   const response = await fetch(
@@ -83,3 +76,14 @@ export const isCancelable = (task: Task) =>
 
 export const errorMessage = (e: unknown) =>
   e instanceof Error ? e.message : String(e);
+
+export interface SshKey {
+  name: string;
+  key: string;
+}
+
+export const fetchSshKeys = async (): Promise<SshKey[]> => {
+  const response = await fetch("/api/ssh-keys");
+  await ensureOk(response, "Failed to load SSH keys");
+  return response.json();
+};

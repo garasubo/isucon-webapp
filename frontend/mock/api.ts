@@ -103,6 +103,14 @@ let nextId = tasks.length + 1;
 const CONFIG_ERROR = process.env.MOCK_CONFIG_ERROR
   ? "configuration error: missing value for field app_repository. Check backend .env"
   : undefined;
+
+const SSH_KEYS = [
+  {
+    name: "id_ed25519.pub",
+    key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMockMockMockMockMockMockMockMockMockMockMock ubuntu@isucon-webapp",
+  },
+];
+
 const deployStartedAt = new Map<number, number>();
 
 // Mimics task_runner: run one pending task at a time.
@@ -157,11 +165,53 @@ const sendError = (res: ServerResponse, status: number, message: string) => {
   res.end(message);
 };
 
+// Like the backend's SSE streams, but checks for changes on a timer instead
+// of being notified: sends `snapshot()` whenever it differs from the last one.
+const sendStream = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  snapshot: () => { data: unknown } | { error: string }
+) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+  });
+  let last: string | undefined;
+  const send = () => {
+    const current = snapshot();
+    const message =
+      "data" in current
+        ? `data: ${JSON.stringify(current.data)}\n\n`
+        : `event: server-error\ndata: ${current.error}\n\n`;
+    if (message === last) return;
+    last = message;
+    res.write(message);
+  };
+  send();
+  const timer = setInterval(send, 500);
+  req.on("close", () => clearInterval(timer));
+};
+
 const handle = async (req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname.replace(/\/$/, "");
   const method = req.method ?? "GET";
+  // Served even with a config error, like the backend.
+  if (path === "/api/ssh-keys" && method === "GET") {
+    return sendJson(res, SSH_KEYS);
+  }
   if (CONFIG_ERROR) return sendError(res, 503, CONFIG_ERROR);
+  if (path === "/api/tasks/stream" && method === "GET") {
+    return sendStream(req, res, () => ({ data: tasks.map(toTask) }));
+  }
+  const streamMatch = path.match(/^\/api\/tasks\/(\d+)\/stream$/);
+  if (streamMatch && method === "GET") {
+    const id = Number(streamMatch[1]);
+    return sendStream(req, res, () => {
+      const found = tasks.find((t) => t.id === id);
+      return found ? { data: found } : { error: "not found" };
+    });
+  }
   const idMatch = path.match(/^\/api\/tasks\/(\d+)(\/files)?$/);
   const task = idMatch ? tasks.find((t) => t.id === Number(idMatch[1])) : undefined;
 

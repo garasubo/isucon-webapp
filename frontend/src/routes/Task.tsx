@@ -1,11 +1,11 @@
 import React from "react";
 import { Link, useParams } from "wouter";
-import { type TaskDetail, fetchTask } from "~/api";
+import { type TaskDetail, taskStreamUrl } from "~/api";
 import LoadError from "~/components/LoadError";
 import StatusBadge from "~/components/StatusBadge";
 import { ArrowLeftIcon, CopyIcon, DownloadIcon } from "~/components/icons";
 import { cardClass, pageClass, secondaryButtonClass } from "~/components/ui";
-import { usePolling } from "~/hooks/usePolling";
+import { useEventStream } from "~/hooks/useEventStream";
 import { formatDateTime, formatDuration, formatScore } from "~/lib/format";
 
 const LOGS = [
@@ -140,7 +140,7 @@ function LogViewer({ task }: { task: TaskDetail }) {
 
 export default function Task() {
   const { id } = useParams<{ id: string }>();
-  const { data: task, error } = usePolling(() => fetchTask(id), 1000);
+  const { data: task, error } = useEventStream<TaskDetail>(taskStreamUrl(id));
 
   React.useEffect(() => {
     document.title = `タスク#${id} | ISUCON14 Deploy Server`;
