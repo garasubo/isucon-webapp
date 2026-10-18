@@ -57,5 +57,8 @@ export const formatDuration = (fromIso: string, toIso: string): string => {
   return parts.filter(Boolean).join("") || "0秒";
 };
 
+/** The first 7 characters of a commit hash, like git's short hash. */
+export const shortHash = (hash: string): string => hash.slice(0, 7);
+
 export const formatScore = (score: number | null | undefined): string =>
   score == null ? "—" : score.toLocaleString("en-US");

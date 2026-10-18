@@ -2,6 +2,7 @@ export interface Task {
   id: number;
   status: string;
   branch: string;
+  commit_hash: string | null;
   score: number | null;
   created_at: string;
   updated_at: string;
@@ -52,20 +53,49 @@ const patchTask = async (
 export const cancelTask = (id: number) =>
   patchTask(id, { status: "canceled" }, "Failed to cancel task");
 
-export const reportScore = async (id: number, score: number, files: File[]) => {
-  if (files.length > 0) {
-    // The backend picks the log type from each part's name (access.log etc.).
-    const formData = new FormData();
-    for (const file of files) {
-      formData.append(file.name, file);
-    }
-    const response = await fetch(`/api/tasks/${id}/files`, {
-      method: "POST",
-      body: formData,
-    });
-    await ensureOk(response, "Failed to upload logs");
+const uploadLogs = async (id: number, files: File[]) => {
+  if (files.length === 0) return;
+  // The backend picks the log type from each part's name (access.log etc.).
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append(file.name, file);
   }
+  const response = await fetch(`/api/tasks/${id}/files`, {
+    method: "POST",
+    body: formData,
+  });
+  await ensureOk(response, "Failed to upload logs");
+};
+
+export const reportScore = async (id: number, score: number, files: File[]) => {
+  await uploadLogs(id, files);
   return patchTask(id, { status: "done", score }, "Failed to report score");
+};
+
+/** While deploying is disabled: records a finished task for the branch's latest commit. */
+export const registerScore = async (
+  branch: string,
+  score: number,
+  files: File[]
+) => {
+  const response = await fetch(
+    `/api/tasks?branch=${encodeURIComponent(branch)}&score=${score}`,
+    { method: "POST" }
+  );
+  await ensureOk(response, "Failed to register score");
+  const id: number = await response.json();
+  await uploadLogs(id, files);
+  return id;
+};
+
+export interface Config {
+  deploy_enabled: boolean;
+}
+
+export const fetchConfig = async (): Promise<Config> => {
+  const response = await fetch("/api/config");
+  await ensureOk(response, "Failed to load config");
+  return response.json();
 };
 
 export const isRunning = (task: Task) =>

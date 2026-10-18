@@ -1,15 +1,19 @@
 import React from "react";
 import { Link } from "wouter";
 import {
+  type Config,
   TASKS_STREAM_URL,
   type Task,
   cancelTask,
   errorMessage,
+  fetchConfig,
   isCancelable,
   isRunning,
+  registerScore,
   reportScore,
   submitTask,
 } from "~/api";
+import CommitHash from "~/components/CommitHash";
 import StatusBadge from "~/components/StatusBadge";
 import LoadError from "~/components/LoadError";
 import { PlusIcon, UploadIcon } from "~/components/icons";
@@ -49,7 +53,21 @@ const TaskIdLink = ({ id }: { id: number }) => (
   </Link>
 );
 
-function ReportForm({ taskId }: { taskId: number }) {
+/** Score and log inputs. `onSubmit` sends them; the form is cleared once it succeeds. */
+function ReportForm({
+  onSubmit,
+  canSubmit = true,
+  className,
+  heading,
+  children,
+}: {
+  onSubmit: (score: number, files: File[]) => Promise<unknown>;
+  canSubmit?: boolean;
+  className: string;
+  heading: React.ReactNode;
+  /** Extra fields shown above the score. */
+  children?: React.ReactNode;
+}) {
   const [score, setScore] = React.useState("");
   const [files, setFiles] = React.useState<File[]>([]);
   const [dragging, setDragging] = React.useState(false);
@@ -59,22 +77,20 @@ function ReportForm({ taskId }: { taskId: number }) {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
-    reportScore(taskId, Number(score), files)
+    onSubmit(Number(score), files)
+      .then(() => {
+        setScore("");
+        setFiles([]);
+        setError(undefined);
+      })
       .catch((err) => setError(errorMessage(err)))
       .finally(() => setSubmitting(false));
   };
 
   return (
-    <form
-      onSubmit={submit}
-      className="flex flex-col gap-4 border-t border-line-soft bg-[#FAFBFC] px-6 pb-6 pt-5"
-    >
-      <div>
-        <h3 className="m-0 text-base font-semibold">ベンチマーク結果を報告</h3>
-        <p className="mb-0 mt-1 text-[13px] text-muted">
-          ポータルでベンチマークを実行したあと、スコアとログを登録するとタスクが完了します。
-        </p>
-      </div>
+    <form onSubmit={submit} className={`flex flex-col gap-4 ${className}`}>
+      {heading}
+      {children}
       <div className="flex flex-wrap gap-4">
         <div className="flex flex-[1_1_180px] flex-col gap-1.5">
           <label htmlFor="score" className={labelClass}>
@@ -153,7 +169,7 @@ function ReportForm({ taskId }: { taskId: number }) {
         <ErrorText message={error} />
         <button
           type="submit"
-          disabled={submitting || score === ""}
+          disabled={submitting || score === "" || !canSubmit}
           className={primaryButtonClass}
         >
           完了
@@ -181,6 +197,10 @@ function RunningTaskCard({ task }: { task: Task }) {
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono text-[22px] font-semibold leading-[1.3]">
             <TaskIdLink id={task.id} />
             <span className="break-all">{task.branch}</span>
+            <CommitHash
+              hash={task.commit_hash}
+              className="text-base text-muted"
+            />
           </div>
           <div className="text-[13px] text-muted">
             {formatTime(task.created_at)}に追加、
@@ -231,7 +251,20 @@ function RunningTaskCard({ task }: { task: Task }) {
         </ol>
       </div>
       {deployed ? (
-        <ReportForm taskId={task.id} />
+        <ReportForm
+          onSubmit={(score, files) => reportScore(task.id, score, files)}
+          className="border-t border-line-soft bg-[#FAFBFC] px-6 pb-6 pt-5"
+          heading={
+            <div>
+              <h3 className="m-0 text-base font-semibold">
+                ベンチマーク結果を報告
+              </h3>
+              <p className="mb-0 mt-1 text-[13px] text-muted">
+                ポータルでベンチマークを実行したあと、スコアとログを登録するとタスクが完了します。
+              </p>
+            </div>
+          }
+        />
       ) : (
         <p className="m-0 border-t border-line-soft bg-[#FAFBFC] px-6 py-4 text-[13px] text-muted">
           デプロイが終わると、ここからベンチマーク結果を報告できます。
@@ -255,6 +288,52 @@ const IdleCard = () => (
     </p>
   </section>
 );
+
+/** Shown instead of the running task and the deploy form while deploying is disabled. */
+function ScoreCard() {
+  const [branch, setBranch] = React.useState("");
+
+  return (
+    <section
+      aria-labelledby="score-title"
+      className={`${cardClass} min-w-0 flex-[999_1_560px] overflow-hidden`}
+    >
+      <ReportForm
+        onSubmit={(score, files) =>
+          registerScore(branch.trim(), score, files).then(() => setBranch(""))
+        }
+        canSubmit={branch.trim() !== ""}
+        className="px-6 pb-6 pt-5"
+        heading={
+          <div>
+            <h2 id="score-title" className="m-0 text-base font-semibold">
+              ベンチマーク結果を登録
+            </h2>
+            <p className="mb-0 mt-1 text-[13px] text-muted">
+              ベンチマークを実行したブランチとスコア、ログを登録します。コミットはブランチの最新のものが記録されます。
+            </p>
+          </div>
+        }
+      >
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="score-branch" className={labelClass}>
+            ブランチ
+          </label>
+          <input
+            id="score-branch"
+            type="text"
+            autoComplete="off"
+            required
+            placeholder="feature/..."
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            className={`${inputClass} h-11 text-[15px]`}
+          />
+        </div>
+      </ReportForm>
+    </section>
+  );
+}
 
 function DeployCard({ pendingTasks }: { pendingTasks: Task[] }) {
   const [branch, setBranch] = React.useState("");
@@ -347,7 +426,8 @@ function BestScoreCard({ tasks }: { tasks: Task[] }) {
       </div>
       {best ? (
         <div className="text-[13px] text-muted">
-          <TaskIdLink id={best.id} /> {best.branch}、
+          <TaskIdLink id={best.id} /> {best.branch}{" "}
+          <CommitHash hash={best.commit_hash} />、
           {formatTime(best.updated_at)}に完了
         </div>
       ) : (
@@ -496,7 +576,11 @@ function TaskHistory({ tasks }: { tasks: Task[] }) {
                 <TaskIdLink id={task.id} />
               </span>
               <span role="cell" className="min-w-0 truncate pr-4 font-mono">
-                {task.branch}
+                {task.branch}{" "}
+                <CommitHash
+                  hash={task.commit_hash}
+                  className="text-xs text-muted"
+                />
               </span>
               <span role="cell">
                 <StatusBadge status={task.status} />
@@ -546,15 +630,24 @@ function TaskHistory({ tasks }: { tasks: Task[] }) {
 
 export default function Index() {
   const { data, error } = useEventStream<Task[]>(TASKS_STREAM_URL);
+  const [config, setConfig] = React.useState<Config>();
+  const [configError, setConfigError] = React.useState<string>();
+
+  React.useEffect(() => {
+    fetchConfig()
+      .then(setConfig)
+      .catch((e) => setConfigError(errorMessage(e)));
+  }, []);
 
   React.useEffect(() => {
     document.title = "タスク一覧 | ISUCON14 Deploy Server";
   }, []);
 
-  if (!data) {
-    return error ? (
+  if (!data || !config) {
+    const loadError = error ?? configError;
+    return loadError ? (
       <main className={pageClass}>
-        <LoadError message={error} />
+        <LoadError message={loadError} />
       </main>
     ) : (
       <p className="px-gutter py-8 text-muted">読み込み中…</p>
@@ -572,14 +665,16 @@ export default function Index() {
       <h1 className="sr-only">タスク一覧</h1>
       {error && <LoadError message={error} />}
       <div className="flex flex-wrap items-start gap-6">
-        {runningTask ? (
+        {!config.deploy_enabled ? (
+          <ScoreCard />
+        ) : runningTask ? (
           // Remount per task so the report form starts empty.
           <RunningTaskCard key={runningTask.id} task={runningTask} />
         ) : (
           <IdleCard />
         )}
         <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-6">
-          <DeployCard pendingTasks={pendingTasks} />
+          {config.deploy_enabled && <DeployCard pendingTasks={pendingTasks} />}
           <BestScoreCard tasks={tasks} />
         </div>
       </div>

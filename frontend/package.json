@@ -8,6 +8,7 @@
     "dev": "vite",
     "dev:mock": "vite --mode mock",
     "dev:mock:config-error": "MOCK_CONFIG_ERROR=1 vite --mode mock",
+    "dev:mock:no-deploy": "MOCK_DISABLE_DEPLOY=1 vite --mode mock",
     "lint": "eslint --ignore-path .gitignore --cache --cache-location ./node_modules/.cache/eslint .",
     "preview": "vite preview",
     "typecheck": "tsc",

@@ -1,6 +1,7 @@
 import React from "react";
 import { Link, useParams } from "wouter";
 import { type TaskDetail, taskStreamUrl } from "~/api";
+import CommitHash from "~/components/CommitHash";
 import LoadError from "~/components/LoadError";
 import StatusBadge from "~/components/StatusBadge";
 import { ArrowLeftIcon, CopyIcon, DownloadIcon } from "~/components/icons";
@@ -193,6 +194,13 @@ export default function Task() {
       </section>
 
       <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-px overflow-hidden rounded-xl border border-line bg-line">
+        <MetaItem label="コミット">
+          {task.commit_hash ? (
+            <CommitHash hash={task.commit_hash} className="text-ink" />
+          ) : (
+            "—"
+          )}
+        </MetaItem>
         <MetaItem label="作成日時">{formatDateTime(task.created_at)}</MetaItem>
         <MetaItem label="更新日時">{formatDateTime(task.updated_at)}</MetaItem>
         <MetaItem label="所要時間">

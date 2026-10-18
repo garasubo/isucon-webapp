@@ -9,6 +9,7 @@ import type { Plugin } from "vite";
 interface MockTask {
   id: number;
   branch: string;
+  commit_hash: string | null;
   status: string;
   score: number | null;
   created_at: string;
@@ -49,6 +50,7 @@ const newTask = (id: number, branch: string, fields: Partial<MockTask> = {}) => 
   return {
     id,
     branch,
+    commit_hash: null,
     status: "pending",
     score: null,
     created_at: now,
@@ -61,8 +63,12 @@ const newTask = (id: number, branch: string, fields: Partial<MockTask> = {}) => 
   };
 };
 
+const randomHash = () =>
+  Array.from({ length: 40 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+
 const tasks: MockTask[] = [
   newTask(1, "main", {
+    commit_hash: randomHash(),
     status: "done",
     score: 1234,
     created_at: minutesAgo(60),
@@ -90,6 +96,7 @@ const tasks: MockTask[] = [
     updated_at: minutesAgo(28),
   }),
   newTask(4, "feature/cache", {
+    commit_hash: randomHash(),
     status: "done",
     score: 5678,
     created_at: minutesAgo(20),
@@ -103,6 +110,9 @@ let nextId = tasks.length + 1;
 const CONFIG_ERROR = process.env.MOCK_CONFIG_ERROR
   ? "configuration error: missing value for field app_repository. Check backend .env"
   : undefined;
+
+// `npm run dev:mock:no-deploy` mimics a backend with DISABLE_DEPLOY=true.
+const DEPLOY_ENABLED = !process.env.MOCK_DISABLE_DEPLOY;
 
 const SSH_KEYS = [
   {
@@ -123,6 +133,7 @@ const tick = () => {
     deployStartedAt.delete(task.id);
     const failed = task.branch.includes("fail");
     task.status = failed ? "deploy_failed" : "deployed";
+    if (!failed) task.commit_hash = randomHash();
     task.stdout = `Deploying ${task.branch}...\n${failed ? "" : "Done.\n"}`;
     if (failed) task.stderr = `deploy command failed for ${task.branch}\n`;
     task.updated_at = timestamp();
@@ -140,9 +151,18 @@ const tick = () => {
   }
 };
 
-const toTask = ({ id, branch, status, score, created_at, updated_at }: MockTask) => ({
+const toTask = ({
   id,
   branch,
+  commit_hash,
+  status,
+  score,
+  created_at,
+  updated_at,
+}: MockTask) => ({
+  id,
+  branch,
+  commit_hash,
   status,
   score,
   created_at,
@@ -201,6 +221,9 @@ const handle = async (req: IncomingMessage, res: ServerResponse) => {
     return sendJson(res, SSH_KEYS);
   }
   if (CONFIG_ERROR) return sendError(res, 503, CONFIG_ERROR);
+  if (path === "/api/config" && method === "GET") {
+    return sendJson(res, { deploy_enabled: DEPLOY_ENABLED });
+  }
   if (path === "/api/tasks/stream" && method === "GET") {
     return sendStream(req, res, () => ({ data: tasks.map(toTask) }));
   }
@@ -221,6 +244,21 @@ const handle = async (req: IncomingMessage, res: ServerResponse) => {
   if (path === "/api/tasks" && method === "POST") {
     const branch = url.searchParams.get("branch");
     if (branch === null) return sendError(res, 400, "branch");
+    if (!DEPLOY_ENABLED) {
+      const score = Number(url.searchParams.get("score") ?? "");
+      if (!Number.isInteger(score)) return sendError(res, 400, "score");
+      // Stands in for a branch that `git rev-parse` cannot find.
+      if (branch.includes("missing")) {
+        return sendError(res, 400, `commit not found for origin/${branch}`);
+      }
+      const created = newTask(nextId++, branch, {
+        commit_hash: randomHash(),
+        status: "done",
+        score,
+      });
+      tasks.push(created);
+      return sendJson(res, created.id);
+    }
     const created = newTask(nextId++, branch);
     tasks.push(created);
     tick();
