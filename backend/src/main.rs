@@ -33,6 +33,7 @@ struct Task {
     #[sqlx(try_from = "i64")]
     id: u64,
     branch: String,
+    commit_hash: Option<String>,
     status: String,
     score: Option<i64>,
     created_at: chrono::DateTime<chrono::Local>,
@@ -249,12 +250,29 @@ async fn task_stream_handler(
     })
 }
 
+#[derive(Debug, serde::Serialize)]
+struct ClientConfig {
+    deploy_enabled: bool,
+}
+
+#[axum::debug_handler]
+async fn get_config_handler(
+    State(AppState { repo, .. }): State<AppState>,
+) -> axum::Json<ClientConfig> {
+    axum::Json(ClientConfig {
+        deploy_enabled: repo.is_none(),
+    })
+}
+
+/// Queues a deploy of the branch. While deploying is disabled, records the score
+/// for the branch's latest commit as a finished task instead.
 #[axum::debug_handler]
 async fn post_task_handler(
     State(AppState {
         pool,
         notify,
         changed,
+        repo,
         ..
     }): State<AppState>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -262,6 +280,25 @@ async fn post_task_handler(
     let branch = params
         .get("branch")
         .ok_or(AppError::InvalidQueryParameter("branch".to_string()))?;
+    if let Some(repo) = repo {
+        let score = params
+            .get("score")
+            .and_then(|score| score.parse::<i64>().ok())
+            .ok_or(AppError::InvalidQueryParameter("score".to_string()))?;
+        let commit_hash = fetch_branch_commit(&repo, branch)
+            .await
+            .map_err(AppError::InvalidQueryParameter)?;
+        let result = sqlx::query(
+            "INSERT INTO tasks (branch, commit_hash, status, score) VALUES (?, ?, 'done', ?)",
+        )
+        .bind(branch)
+        .bind(commit_hash)
+        .bind(score)
+        .execute(&pool)
+        .await?;
+        changed.send_replace(());
+        return Ok(axum::Json(result.last_insert_id()));
+    }
     let result = sqlx::query("INSERT INTO tasks (branch, status) VALUES (?, ?)")
         .bind(branch)
         .bind("pending")
@@ -364,6 +401,13 @@ async fn get_ssh_keys_handler() -> Result<axum::Json<Vec<SshKey>>, AppError> {
     Ok(axum::Json(keys))
 }
 
+/// The cloned app repository, used to resolve branches while deploying is disabled.
+struct Repo {
+    directory: PathBuf,
+    /// Keeps concurrent requests from running `git fetch` at the same time.
+    lock: tokio::sync::Mutex<()>,
+}
+
 #[derive(Clone)]
 struct AppState {
     pool: MySqlPool,
@@ -373,6 +417,8 @@ struct AppState {
     /// Set when the config (.env) could not be loaded or the repository could not be
     /// cloned; every API then fails with it.
     startup_error: Option<Arc<str>>,
+    /// Set when deploying is disabled (DISABLE_DEPLOY=true).
+    repo: Option<Arc<Repo>>,
 }
 
 async fn require_config(
@@ -389,7 +435,10 @@ async fn require_config(
 #[derive(Debug, serde::Deserialize)]
 struct Config {
     app_repository: String,
-    deploy_command: String,
+    /// Required unless deploying is disabled.
+    deploy_command: Option<String>,
+    #[serde(default)]
+    disable_deploy: bool,
 }
 
 /// Runs pending tasks one at a time. A failing task is marked deploy_failed and
@@ -398,12 +447,14 @@ async fn task_runner(
     pool: MySqlPool,
     notify: Arc<tokio::sync::Notify>,
     changed: Arc<watch::Sender<()>>,
-    config: Config,
+    deploy_command: String,
     repo_directory: PathBuf,
 ) {
     println!("repo_directory: {:?}", repo_directory);
     loop {
-        if let Err(e) = run_next_task(&pool, &notify, &changed, &config, &repo_directory).await {
+        if let Err(e) =
+            run_next_task(&pool, &notify, &changed, &deploy_command, &repo_directory).await
+        {
             eprintln!("task_runner error: {:?}", e);
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
@@ -414,7 +465,7 @@ async fn run_next_task(
     pool: &MySqlPool,
     notify: &tokio::sync::Notify,
     changed: &watch::Sender<()>,
-    config: &Config,
+    deploy_command: &str,
     repo_directory: &Path,
 ) -> Result<(), anyhow::Error> {
     let mut tx = pool.begin().await?;
@@ -449,7 +500,7 @@ async fn run_next_task(
     tx.commit().await?;
     changed.send_replace(());
 
-    let succeeded = match deploy_task(&task, config, repo_directory).await {
+    let succeeded = match deploy_task(pool, changed, &task, deploy_command, repo_directory).await {
         Ok(succeeded) => succeeded,
         Err(e) => {
             eprintln!("deploy error: {:?}", e);
@@ -475,46 +526,117 @@ async fn run_next_task(
     Ok(())
 }
 
-/// Checks out the task's branch and runs the deploy command, writing their output
-/// to the task's stdout/stderr files. Returns whether every step succeeded.
+/// Checks out the task's branch, records its commit hash and runs the deploy command,
+/// writing their output to the task's stdout/stderr files. Returns whether every step
+/// succeeded.
 async fn deploy_task(
+    pool: &MySqlPool,
+    changed: &watch::Sender<()>,
     task: &Task,
-    config: &Config,
+    deploy_command: &str,
     repo_directory: &Path,
 ) -> Result<bool, anyhow::Error> {
     let file_dir = get_task_file_path(task.id)?;
     tokio::fs::create_dir_all(&file_dir).await?;
     println!("file_dir: {:?}", file_dir);
     let stdout = std::fs::File::create(file_dir.join("stdout"))?;
-    let stderr = std::fs::File::create(file_dir.join("stderr"))?;
+    let mut stderr = std::fs::File::create(file_dir.join("stderr"))?;
 
     let mut fetch = tokio::process::Command::new("git");
     fetch.arg("fetch");
     let mut checkout = tokio::process::Command::new("git");
     checkout.args(["checkout", &format!("origin/{}", task.branch)]);
-    let mut deploy = tokio::process::Command::new("bash");
-    deploy.args(["-c", &config.deploy_command]);
-
-    for mut command in [fetch, checkout, deploy] {
-        let status = command
-            .current_dir(repo_directory)
-            .stdout(stdout.try_clone()?)
-            .stderr(stderr.try_clone()?)
-            .status()
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to run {:?} in {:?}",
-                    command.as_std(),
-                    repo_directory
-                )
-            })?;
-        if !status.success() {
-            eprintln!("{:?} failed: {}", command.as_std(), status);
+    for command in [fetch, checkout] {
+        if !run_logged(command, repo_directory, &stdout, &stderr).await? {
             return Ok(false);
         }
     }
-    Ok(true)
+
+    match resolve_commit(repo_directory, "HEAD").await {
+        Ok(commit_hash) => {
+            sqlx::query("UPDATE tasks SET commit_hash = ? WHERE id = ?")
+                .bind(commit_hash)
+                .bind(task.id)
+                .execute(pool)
+                .await?;
+            changed.send_replace(());
+        }
+        // The deploy itself can go on without the hash.
+        Err(e) => writeln!(stderr, "{}", e)?,
+    }
+
+    let mut deploy = tokio::process::Command::new("bash");
+    deploy.args(["-c", deploy_command]);
+    run_logged(deploy, repo_directory, &stdout, &stderr).await
+}
+
+/// Runs the command in the repository with its output going to the given files.
+/// Returns whether it succeeded.
+async fn run_logged(
+    mut command: tokio::process::Command,
+    repo_directory: &Path,
+    stdout: &std::fs::File,
+    stderr: &std::fs::File,
+) -> Result<bool, anyhow::Error> {
+    let status = command
+        .current_dir(repo_directory)
+        .stdout(stdout.try_clone()?)
+        .stderr(stderr.try_clone()?)
+        .status()
+        .await
+        .with_context(|| {
+            format!(
+                "failed to run {:?} in {:?}",
+                command.as_std(),
+                repo_directory
+            )
+        })?;
+    if !status.success() {
+        eprintln!("{:?} failed: {}", command.as_std(), status);
+    }
+    Ok(status.success())
+}
+
+/// Runs git in the repository and returns its trimmed stdout.
+async fn git_output(repo_directory: &Path, args: &[&str]) -> Result<String, String> {
+    let output = tokio::process::Command::new("git")
+        .args(args)
+        .current_dir(repo_directory)
+        .output()
+        .await
+        .map_err(|e| format!("failed to run git: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "git {} failed ({}): {}",
+            args.join(" "),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim_end()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Returns the full hash of the commit that `rev` points to.
+async fn resolve_commit(repo_directory: &Path, rev: &str) -> Result<String, String> {
+    git_output(
+        repo_directory,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{}^{{commit}}", rev),
+        ],
+    )
+    .await
+    // --quiet leaves git's stderr empty, so its error says nothing more.
+    .map_err(|_| format!("commit not found for {}", rev))
+}
+
+/// Fetches the repository and returns the hash of the branch's latest commit.
+async fn fetch_branch_commit(repo: &Repo, branch: &str) -> Result<String, String> {
+    let _guard = repo.lock.lock().await;
+    git_output(&repo.directory, &["fetch"]).await?;
+    resolve_commit(&repo.directory, &format!("origin/{}", branch)).await
 }
 
 fn append_stderr(id: u64, message: &str) -> Result<(), std::io::Error> {
@@ -552,7 +674,13 @@ async fn clone_repository(config: &Config) -> Result<PathBuf, String> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
     let config = envy::from_env::<Config>()
-        .map_err(|e| format!("configuration error: {}. Check backend .env", e));
+        .map_err(|e| format!("configuration error: {}. Check backend .env", e))
+        .and_then(|config| {
+            if !config.disable_deploy && config.deploy_command.is_none() {
+                return Err("configuration error: missing value for field deploy_command. Check backend .env".to_string());
+            }
+            Ok(config)
+        });
     let options = MySqlConnectOptions::new()
         .host("localhost")
         .port(
@@ -566,7 +694,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .database("webapp");
     let pool = MySqlPoolOptions::new().connect_with(options).await?;
     db::init_db(&pool).await?;
-    // Without a config and a repository there is nothing to deploy, so only serve the error.
+    // Without a config and a repository there is nothing to deploy or record, so only
+    // serve the error.
     let startup = match config {
         Ok(config) => clone_repository(&config)
             .await
@@ -578,15 +707,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let notify = Arc::new(tokio::sync::Notify::new());
     let changed = Arc::new(watch::Sender::new(()));
+    let startup_error = startup.as_ref().err().map(|e| e.as_str().into());
+    let (deploy, repo) = match startup {
+        Ok((config, directory)) if config.disable_deploy => {
+            println!("deploy is disabled");
+            let repo = Repo {
+                directory,
+                lock: tokio::sync::Mutex::new(()),
+            };
+            (None, Some(Arc::new(repo)))
+        }
+        Ok((config, directory)) => (config.deploy_command.map(|c| (c, directory)), None),
+        Err(_) => (None, None),
+    };
     let state = AppState {
         pool: pool.clone(),
         notify: notify.clone(),
         changed: changed.clone(),
-        startup_error: startup.as_ref().err().map(|e| e.as_str().into()),
+        startup_error,
+        repo,
     };
     let app = Router::new()
         .route("/api", axum::routing::get(|| async { "Hello, World!" }))
         .route("/api/init", axum::routing::post(init_handler))
+        .route("/api/config", axum::routing::get(get_config_handler))
         .route(
             "/api/tasks/:id/files",
             axum::routing::post(upload_file_handler),
@@ -614,8 +758,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Outside require_config: the key is needed to set up deploying in the first place.
         .route("/api/ssh-keys", axum::routing::get(get_ssh_keys_handler))
         .with_state(state);
-    if let Ok((config, repo_directory)) = startup {
-        tokio::task::spawn(task_runner(pool, notify, changed, config, repo_directory));
+    if let Some((deploy_command, repo_directory)) = deploy {
+        tokio::task::spawn(task_runner(
+            pool,
+            notify,
+            changed,
+            deploy_command,
+            repo_directory,
+        ));
     }
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
 

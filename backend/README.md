@@ -12,7 +12,15 @@ ISUCON練習用のデプロイ・ベンチマーク管理サーバーのバッ�
 2. `git checkout origin/<branch>`
 3. `bash -c "$DEPLOY_COMMAND"`
 
-実行時の出力は`./file/<タスクID>/stdout`と`./file/<タスクID>/stderr`に保存されます。
+実行時の出力は`./file/<タスクID>/stdout`と`./file/<タスクID>/stderr`に保存されます。checkoutしたコミットのハッシュはタスクの`commit_hash`に記録されます。
+
+### スコア登録専用モード
+
+`.env`に`DISABLE_DEPLOY=true`を書くと、デプロイを行わず、スコアの記録だけに使えます。デプロイは別の手段で行う場合に使います。
+
+- タスクランナーは起動せず、キューもありません。`DEPLOY_COMMAND`は不要です。
+- コミットハッシュを特定するため、`APP_REPOSITORY`のcloneは通常どおり行います。
+- 画面ではブランチ、スコア、ログを入力して登録します。APIは`POST /api/tasks?branch=<branch>&score=<score>`です。バックエンドは`git fetch`してから`origin/<branch>`のコミットハッシュを特定し、タスクを`done`として作ります。ブランチが見つからないときは400を返します。
 
 設定の読み込みやcloneに失敗しても、プロセスは終了せずに起動し、すべてのAPIがそのエラーを返します。フロントエンドはこのエラーを画面に表示します。
 
@@ -38,10 +46,13 @@ APP_REPOSITORY=<owner>/<repo>
 DEPLOY_COMMAND=<リポジトリ内で実行するデプロイコマンド>
 ```
 
+スコア登録専用モードでは`DEPLOY_COMMAND`の代わりに`DISABLE_DEPLOY=true`を書きます。
+
 | 変数 | 必須 | 内容 |
 |---|---|---|
 | `APP_REPOSITORY` | 必須 | `gh repo clone`に渡すリポジトリ |
-| `DEPLOY_COMMAND` | 必須 | cloneしたリポジトリのルートで`bash -c`により実行するコマンド |
+| `DEPLOY_COMMAND` | `DISABLE_DEPLOY`が`true`でなければ必須 | cloneしたリポジトリのルートで`bash -c`により実行するコマンド |
+| `DISABLE_DEPLOY` | 任意 | `true`でスコア登録専用モードにする。値は`true`か`false`。デフォルトは`false` |
 | `MYSQL_PORT` | 任意 | MySQLのポート。デフォルトは3306 |
 
 変数名は大文字で書く必要があります。systemdの`EnvironmentFile`は`export`を解釈できないため、`export`は付けないでください。
